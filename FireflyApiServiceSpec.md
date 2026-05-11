@@ -31,6 +31,7 @@ Required Firefly behavior:
 - The server accepts or rejects registration based on configured device name and `firefly_interface_version`.
 - Registration response includes static LED strip segment definitions and named LED states.
 - After registration, the server initializes slots with a generated `task-id`.
+- On service startup, each enabled device actor must initialize slots by publishing `init-slots` with a newly generated `task-id`.
 - Slot updates are serialized per device through `event-id` correlation and ACK/error handling.
 - If a command does not receive an ACK within the timeout, the actor retries the command up to 3 times before treating the device as disconnected for that command path.
 - Device errors such as missing or mismatched task ID cause reinitialization of slots.
@@ -153,10 +154,10 @@ Each actor should keep these runtime fields:
 - `device_name`: Firefly MQTT device identifier.
 - `status`: unknown, online, offline, register_error.
 - `firefly_interface_version`: configured Firefly device interface version used in topic names and registration validation.
-- `current_task_id`: task ID accepted by the device after slot initialization.
+- `current_task_id`: in-memory task ID accepted by the device after slot initialization for the current actor/device session.
 - `slots`: ordered slot configuration for the device.
 - `slot_states`: last known state, pattern, and pattern value for each slot updated through this service.
-- `pending_command`: optional command waiting for ACK, including event ID, deadline, retry count, and caller correlation.
+- `pending_command`: optional command waiting for ACK, including command type, event ID, original payload, deadline, retry count, caller correlation, next state on ACK, and error recovery behavior.
 - `last_keepalive_at`, `registered_at`, `mac_address`, `firmware_version`.
 
 ### 5.3 Device Actor States
@@ -164,11 +165,17 @@ Each actor should keep these runtime fields:
 The Python actor should implement this state machine:
 
 - `reset`: actor has no known initialized device session.
-- `registering`: actor received registration request and is waiting for ACK to registration response.
-- `initializing_slots`: actor sent `init-slots` and is waiting for ACK.
-- `updating_slots`: actor sent `update-slot-state` or `update-all-slots` and is waiting for ACK.
+- `waiting_ack`: actor has sent one MQTT command that requires ACK and is waiting for ACK, error, or timeout.
 - `active`: actor has initialized slots and can accept commands.
 - `offline`: actor cannot execute commands until registration or keepalive allows reinitialization.
+
+The actor should not use separate top-level states such as `registering`, `initializing_slots`, or `updating_slots` only to represent ACK waiting. Instead, ACK waiting should be represented by `waiting_ack` plus the structured `pending_command.command_type` field. Supported pending command types should include at least `register_response`, `init_slots`, `update_slot_state`, `update_all_slots`, `release_slots`, and `reset`.
+
+The pending command should determine what happens after ACK, error, or timeout. For example, ACK for `register_response` should trigger publishing `init-slots`; ACK for `init_slots` should transition the actor to `active`; ACK for `update_slot_state` or `update_all_slots` should update runtime slot state and transition back to `active`.
+
+When a device actor starts, it must load the configured slots, generate a new `task-id`, publish `init-slots`, and transition to `waiting_ack` with `pending_command.command_type = init_slots`. The `current_task_id` is actor-owned memory for the current physical device session and must not be persisted as active device state. Historical task IDs may be inspected through `firefly_events` payloads for diagnostics.
+
+Registration requests from the device are preemptive and must be accepted from every actor state. When a registration request is received, the actor must assume the physical Firefly controller has reset or restarted. It must discard any pending ACK correlation, complete any waiting caller with a retryable device re-registration failure, clear session-specific runtime state such as `current_task_id`, update registration metadata, publish the registration response, and transition to `waiting_ack` with `pending_command.command_type = register_response`.
 
 Only one MQTT command that requires ACK should be in flight per device actor. Additional API requests should either be queued by the actor mailbox or rejected with a clear conflict response, depending on the final desired behavior. For version 1, queueing through the actor mailbox is recommended.
 
@@ -180,14 +187,18 @@ Commands that time out should be retried up to 3 times before the device is mark
 
 When an ACK arrives:
 
-- If `event-id` matches the pending command, cancel the timeout and transition to the next state.
+- If `event-id` matches the pending command, cancel the timeout and apply the pending command's ACK behavior.
+- If the pending command is `register_response`, publish `init-slots` with a new `event-id` and remain in `waiting_ack` for the new `init_slots` pending command.
+- If the pending command is `init_slots`, store the accepted `task-id` and transition to `active`.
+- If the pending command is `update_slot_state` or `update_all_slots`, persist the resulting runtime slot state and transition to `active`.
+- If the pending command is `reset` or `release_slots`, apply the command-specific recovery behavior and transition to `offline` or `reset` as appropriate.
 - If `event-id` does not match, log a warning and keep waiting.
 
 When an error arrives:
 
 - If `event-id` matches, cancel the timeout and complete the command with a failure.
 - If the error code is `NO_TASK_ID_WHEN_UPDATING_CELLS` or `TASK_ID_MISMATCH_UPDATING_CELLS`, reinitialize slots.
-- Otherwise mark the device offline or disconnected according to the command state.
+- Otherwise mark the device offline or disconnected according to the pending command type and recovery behavior.
 
 When a timeout expires:
 
@@ -346,7 +357,6 @@ Version 1 can support one active broker, but the schema may allow multiple broke
 - `firmware_version`
 - `registered_at`
 - `last_keepalive_at`
-- `current_task_id`
 - `last_error_code`
 - `last_error_description`
 - `created_at`
@@ -477,6 +487,8 @@ Request:
 	"timeoutMs": 7000
 }
 ```
+
+The `currentTaskId` field is runtime actor state exposed for diagnostics. It should come from the active in-memory device actor, not from a persisted device table column.
 
 Response:
 
@@ -647,7 +659,7 @@ On startup:
 5. If no active MQTT broker exists, start the backend and frontend in a not-configured MQTT state so the broker can be created through the UI.
 6. Load enabled Firefly devices from the database.
 7. Start one actor per enabled device after MQTT is connected.
-8. Each actor loads its slots and uses `current_task_id` if available; otherwise it waits for registration or initializes on keepalive according to the protocol behavior.
+8. Each actor loads its slots, generates a new `task-id`, publishes `init-slots`, and waits for ACK. The actor must do this on every startup because `current_task_id` is not persisted as active state across service processes.
 9. Serve FastAPI routes and the React static frontend.
 
 On shutdown:
@@ -716,7 +728,7 @@ Backend tests:
 - Unit tests for MQTT topic builders.
 - Unit tests for Pydantic payload serialization aliases.
 - Unit tests for state, pattern, pattern value, and preset translation to Firefly MQTT payloads.
-- Actor tests for registration, init slots, slot update ACK, slot update error, timeout, and task ID mismatch recovery.
+- Actor tests for registration, startup init slots, slot update ACK, slot update error, timeout, registration preemption while waiting for ACK, and task ID mismatch recovery.
 - Repository tests against SQLite.
 - FastAPI route tests for public and admin APIs.
 
