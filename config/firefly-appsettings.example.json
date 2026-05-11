@@ -1,0 +1,20 @@
+{
+    "database": {
+        "url": "sqlite:///./data/firefly.db"
+    },
+    "firefly": {
+        "firefly_interface_version": "v01.04",
+        "ackTimeoutMs": 7000,
+        "ackMaxRetries": 3,
+        "keepaliveDisconnectAfterSeconds": 300
+    },
+    "events": {
+        "retentionDays": 30
+    },
+    "frontend": {
+        "staticFilesPath": "./frontend/dist"
+    },
+    "logging": {
+        "level": "INFO"
+    }
+}

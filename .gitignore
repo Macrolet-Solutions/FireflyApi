@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+*.egg
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Frontend (later phases)
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local config overrides (the example is checked in)
+config/firefly-appsettings.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code per-project settings
+.claude/
