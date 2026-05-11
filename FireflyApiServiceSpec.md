@@ -32,9 +32,9 @@ Required Firefly behavior:
 - Registration response includes static LED strip segment definitions and named LED states.
 - After registration, the server initializes slots with a generated `task-id`.
 - Slot updates are serialized per device through `event-id` correlation and ACK/error handling.
-- If a command does not receive an ACK within the timeout, the device is treated as disconnected for that command path.
+- If a command does not receive an ACK within the timeout, the actor retries the command up to 3 times before treating the device as disconnected for that command path.
 - Device errors such as missing or mismatched task ID cause reinitialization of slots.
-- Keepalive messages update device liveness.
+- Keepalive messages update device liveness. If no keepalive has been received for 5 minutes and there is no command activity for the controller, the device should be automatically treated as disconnected.
 - Slot configuration and segment configuration are persisted in the database.
 - Runtime device state is actor-owned: current task ID, pending command, last known slot states, and connection state.
 
@@ -176,6 +176,8 @@ Only one MQTT command that requires ACK should be in flight per device actor. Ad
 
 Every MQTT command requiring confirmation must include a generated UUID `event-id`. The actor starts a timeout when publishing. The timeout should default to 7000 ms and be configurable.
 
+Commands that time out should be retried up to 3 times before the device is marked disconnected. Each retry must use a new `event-id`, publish the MQTT command again, and start a new ACK timeout. The original HTTP request should remain pending while retries are attempted because public command endpoints use synchronous ACK-waiting semantics.
+
 When an ACK arrives:
 
 - If `event-id` matches the pending command, cancel the timeout and transition to the next state.
@@ -189,9 +191,12 @@ When an error arrives:
 
 When a timeout expires:
 
-- Complete the command with a timeout error.
-- Mark the device offline/disconnected.
+- If retry attempts remain, republish the command with a new `event-id` and continue waiting.
+- If the retry limit has been reached, complete the command with a timeout error.
+- Mark the device offline/disconnected after the retry limit is reached.
 - Keep the actor alive so it can recover on registration or keepalive.
+
+Device liveness should also be monitored independently of command timeouts. If a device has no keepalive for 5 minutes and has no recent command activity, mark it disconnected/offline. The device can recover when it registers again or sends a keepalive that triggers reinitialization.
 
 ## 6. MQTT Protocol
 
@@ -684,6 +689,8 @@ Example:
 	"firefly": {
 		"mqttProtocolVersion": "v01.04",
 		"ackTimeoutMs": 7000,
+		"ackMaxRetries": 3,
+		"keepaliveDisconnectAfterSeconds": 300,
 		"commandQueueLimitPerDevice": 100
 	},
 	"events": {
