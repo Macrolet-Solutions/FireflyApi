@@ -14,16 +14,16 @@ The application will consist of:
 - A Python backend using FastAPI.
 - SQLAlchemy for database access.
 - Alembic for schema migrations.
-- A lightweight local database by default. SQLite is recommended for a true local file-based database
+- SQLite for the local file-based database.
 - A React frontend served by the FastAPI backend.
-- An actor-based Firefly runtime using Pykka to mirror the Akka.NET design used in the existing Macrolet EndOfLine integration.
+- An actor-based Firefly runtime using Pykka to manage one actor per Firefly device and serialize MQTT command handling.
 - An MQTT client layer for the Firefly protocol.
 
-## 2. Reference Implementation Findings
+## 2. Firefly Protocol and Runtime Requirements
 
-The existing implementation in `Macrolet_EndOfLine` is part of a complete WCS/EOL sorter application. The reusable portion for this service is the low-level Firefly integration implemented mainly in `FireFlySorterActor.fs`, supported by MQTT topic definitions, payload models, database queries, and the registration processor.
+The service must implement only the generic Firefly device integration layer. It must not include WCS, sorter, picking, container, order, lane, PDA, or operator-station business logic. Those workflows belong to external client systems that call this service through the public API.
 
-Important behavior to preserve:
+Required Firefly behavior:
 
 - One actor instance manages one configured Firefly device.
 - Devices communicate using versioned MQTT topics.
@@ -36,9 +36,9 @@ Important behavior to preserve:
 - Device errors such as missing or mismatched task ID cause reinitialization of slots.
 - Keepalive messages update device liveness.
 - Slot configuration and segment configuration are persisted in the database.
-- Runtime active state is actor-owned: current task ID, active/focused slot, occupied slots, and connection state.
+- Runtime device state is actor-owned: current task ID, pending command, last known slot states, and connection state.
 
-Reference MQTT topics:
+Firefly MQTT topics:
 
 ```text
 From device:
@@ -58,7 +58,7 @@ ff/{mqttVersion}/{deviceName}/release-slots
 ff/{mqttVersion}/{deviceName}/reset
 ```
 
-Reference MQTT payload concepts:
+Firefly MQTT payload concepts:
 
 - Registration request: firmware version, device ID/name, MAC address.
 - Registration response: error flag, error description, event ID, device type, LED segments, named LED states.
@@ -76,7 +76,7 @@ Reference MQTT payload concepts:
 - Configure Firefly devices known to this service.
 - Configure each device's LED strip segments.
 - Configure logical slots mapped to device LED segments.
-- Configure reusable LED states and high-level commands such as off, solid color, blink, pulse, and attention/focus patterns.
+- Configure reusable LED states and optional command presets that map friendly names to LED states and firmware-supported slot patterns.
 - Detect device registration, online/offline state, keepalive, firmware version, MAC address, last registration time, and last keepalive time.
 - Initialize devices after registration or service startup.
 - Expose admin APIs used by the React frontend.
@@ -87,7 +87,7 @@ Reference MQTT payload concepts:
 
 ### 3.2 Out of Scope
 
-- Full WCS behavior such as container assignment, sort destination calculation, PDA messaging, operator station workflows, and shipping-sorter business rules.
+- Full WCS behavior such as container assignment, sort destination calculation, PDA messaging, operator station workflows, and other application-specific operational business rules.
 - Multi-tenant authorization unless explicitly required later.
 - Historical analytics beyond basic command/event logs.
 - Direct firmware update management.
@@ -124,7 +124,7 @@ Backend modules should be organized around these responsibilities:
 
 - `api.admin`: frontend-facing management endpoints.
 - `api.public`: external integrator endpoints.
-- `core.config`: application settings, MQTT broker settings, database URL, protocol version, timeouts.
+- `core.config`: local application settings, database URL, Firefly protocol version, timeouts, frontend static path, and logging settings.
 - `db.models`: SQLAlchemy ORM models.
 - `db.repositories`: database persistence operations.
 - `firefly.protocol`: MQTT topics, payload schemas, protocol constants, serializers.
@@ -137,7 +137,7 @@ Backend modules should be organized around these responsibilities:
 
 ### 5.1 Actor Registry
 
-The actor registry owns all active Firefly device actors. On backend startup it loads enabled devices from the database and starts one actor per device. It also owns the global registration-request subscription:
+The actor registry owns all active Firefly device actors. When an active MQTT broker is configured and connected, it loads enabled devices from the database and starts one actor per device. It also owns the global registration-request subscription:
 
 ```text
 cmd/ptm/register-req/+
@@ -155,14 +155,13 @@ Each actor should keep these runtime fields:
 - `mqtt_version`: configured server protocol version.
 - `current_task_id`: task ID accepted by the device after slot initialization.
 - `slots`: ordered slot configuration for the device.
-- `active_slot`: optional slot currently highlighted/focused.
-- `occupied_slots`: optional set of occupied logical slots if the service is used in workflows that need persistent occupancy.
+- `slot_states`: last known state, pattern, and pattern value for each slot updated through this service.
 - `pending_command`: optional command waiting for ACK, including event ID, deadline, retry count, and caller correlation.
 - `last_keepalive_at`, `registered_at`, `mac_address`, `firmware_version`.
 
 ### 5.3 Device Actor States
 
-The Python actor should preserve the state machine shape from the reference implementation:
+The Python actor should implement this state machine:
 
 - `reset`: actor has no known initialized device session.
 - `registering`: actor received registration request and is waiting for ACK to registration response.
@@ -175,7 +174,7 @@ Only one MQTT command that requires ACK should be in flight per device actor. Ad
 
 ### 5.4 ACK, Error, and Timeout Handling
 
-Every MQTT command requiring confirmation must include a generated UUID `event-id`. The actor starts a timeout when publishing. The timeout should default to 7000 ms, matching the reference behavior, and be configurable.
+Every MQTT command requiring confirmation must include a generated UUID `event-id`. The actor starts a timeout when publishing. The timeout should default to 7000 ms and be configurable.
 
 When an ACK arrives:
 
@@ -198,7 +197,7 @@ When a timeout expires:
 
 ### 6.1 Protocol Version
 
-The service must define a configured Firefly MQTT protocol version, for example `1`. A registration request for a different version must be rejected with a registration error response.
+The service must define a configured Firefly MQTT protocol version, for example `v01.04`. A registration request for a different version must be rejected with a registration error response.
 
 ### 6.2 Topic Builder
 
@@ -236,8 +235,8 @@ Example registration response:
 	],
 	"states": [
 		{
-			"name": "OFF",
-			"rgb": "0x000000",
+			"name": "NEEDS-ATTENTION",
+			"rgb": "0xFF8000",
 			"color1-on-ms": 0,
 			"color1-fade-up-ms": 0,
 			"color1-fade-down-ms": 0,
@@ -276,7 +275,7 @@ Example update slot state payload:
 	"slots": [
 		{
 			"slot-inx": 1,
-			"to-state": "FOCUS-POSITION",
+			"to-state": "NEEDS-ATTENTION",
 			"pattern": 0,
 			"pattern-value": 0
 		}
@@ -301,7 +300,7 @@ The exact LED counts used by `slot_ends`, `slot_no_ends`, and `subsegments` appe
 
 ### 6.5 LED States
 
-The system should not seed any default LED states. The states from the existing EndOfLine sorter integration are specific to that sorter use case and should not be treated as product defaults for this service.
+The system should not seed any default LED states. LED states are deployment-specific and should not be treated as product defaults for this service.
 
 LED states must be configured by an administrator or integrator before a Firefly device can be registered successfully. During device registration, the service returns the currently configured states for that installation. If no states are configured, the service should either reject registration with a clear configuration error or keep the device offline until the configuration is completed.
 
@@ -359,15 +358,15 @@ Version 1 can support one active broker, but the schema may allow multiple broke
 - `created_at`
 - `updated_at`
 
-This maps directly to the reference `FireFlySegment` configuration returned during registration.
+This maps directly to the Firefly segment configuration returned during registration.
 
 ### 7.4 `firefly_slots`
 
 - `id`
 - `device_id`
 - `segment_id`
-- `slot_index`: 1-based index sent to the Firefly device.
-- `external_slot_id`: optional business/integrator slot identifier.
+- `slot_index`: required internal 1-based index sent to the Firefly device.
+- `external_slot_id`: required business/integrator slot identifier used by the public API.
 - `label`
 - `segment_position`
 - `num_leds`
@@ -375,7 +374,7 @@ This maps directly to the reference `FireFlySegment` configuration returned duri
 - `created_at`
 - `updated_at`
 
-Slot ordering must be deterministic. The reference implementation orders by channel, segment number, and segment position, then maps to 1-based `slot-inx`. This service should store `slot_index` explicitly and validate uniqueness per device.
+Slot ordering must be deterministic. This service should store `slot_index` explicitly, validate uniqueness per device, and send the configured 1-based `slot_index` to Firefly as `slot-inx`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
 
 ### 7.5 `firefly_led_states`
 
@@ -394,25 +393,23 @@ Slot ordering must be deterministic. The reference implementation orders by chan
 ### 7.6 `firefly_command_presets`
 
 - `id`
-- `name`: off, solid, blink, pulse, focus, occupied, warning, success, error, custom.
+- `name`: deployment-defined friendly name.
 - `led_state_id`
 - `pattern`
 - `pattern_value`
 - `created_at`
 - `updated_at`
 
-This table maps high-level API actions to low-level device state and pattern values.
+This table maps deployment-defined preset names to low-level device state and pattern values.
 
 ### 7.7 `firefly_slot_runtime_states`
 
 - `id`
 - `device_id`
 - `slot_id`
-- `last_state_name`
-- `last_pattern`
-- `last_pattern_value`
-- `is_occupied`
-- `is_active`
+- `current_state_name`
+- `current_pattern`
+- `current_pattern_value`
 - `last_updated_at`
 
 This table is useful for frontend display and service restart recovery. The actor remains the source of truth while running.
@@ -437,6 +434,8 @@ This table should be bounded by retention settings so it does not grow indefinit
 
 Public endpoints are intended for external applications that want to control Firefly devices without knowing MQTT details. They should be stable, documented through OpenAPI, and versioned under `/api/v1/public`.
 
+Public command endpoints must use synchronous ACK-waiting semantics for version 1. The HTTP request should remain open until the Firefly device ACKs the MQTT command, returns a Firefly error, or the configured ACK timeout expires. A successful ACK should return a success response, a Firefly error should return a `502 firefly_error`, and an ACK timeout should return `504 firefly_ack_timeout`.
+
 ### 8.1 Update Firefly Slots
 
 ```http
@@ -451,19 +450,19 @@ Request:
 {
 	"slots": [
 		{
-			"slotIndex": 1,
-			"stateName": "PICK-READY",
+			"externalSlotId": "SLOT-001",
+			"stateName": "READY",
 			"pattern": "full",
 			"patternValue": 0
 		},
 		{
-			"slotIndex": 2,
+			"externalSlotId": "SLOT-002",
 			"stateName": "NEEDS-ATTENTION",
 			"pattern": "slot_ends",
 			"patternValue": 10
 		},
 		{
-			"slotIndex": 3,
+			"externalSlotId": "SLOT-003",
 			"stateName": "OFF",
 			"pattern": "full",
 			"patternValue": 0
@@ -485,7 +484,9 @@ Response:
 }
 ```
 
-The preferred version 1 contract is explicit and close to the Firefly device model: callers provide a `slotIndex`, a configured `stateName`, and optional `pattern` and `patternValue` information. The service validates that the state exists in `firefly_led_states`, validates that the pattern is one of the fixed firmware-supported pattern values, translates the request into Firefly `to-state`, `pattern`, and `pattern-value` fields, and sends one MQTT `update-slot-state` command to the device actor.
+The preferred version 1 contract is explicit for integrators while hiding Firefly hardware indexes: callers provide an `externalSlotId`, a configured `stateName`, and optional `pattern` and `patternValue` information. The service resolves `externalSlotId` to the configured internal `slot_index`, validates that the state exists in `firefly_led_states`, validates that the pattern is one of the fixed firmware-supported pattern values, translates the request into Firefly `slot-inx`, `to-state`, `pattern`, and `pattern-value` fields, and sends one MQTT `update-slot-state` command to the device actor.
+
+The public API must not accept Firefly `slotIndex` directly. `slot_index` is an internal hardware mapping managed through admin configuration so that external systems can use stable business identifiers without depending on physical slot numbering.
 
 If `pattern` is omitted, the service should default it to `full`. If `patternValue` is omitted, the service should default it to `0`. For patterns where firmware gives `pattern-value` a special meaning, callers may provide a non-zero `patternValue`.
 
@@ -510,12 +511,15 @@ Request:
 
 ```json
 {
-	"action": "off",
-	"presetName": null,
+	"stateName": "OFF",
+	"pattern": "full",
+	"patternValue": 0,
 	"clientRequestId": "optional-client-correlation-id",
 	"timeoutMs": 7000
 }
 ```
+
+This endpoint applies the same configured state and pattern to every enabled slot on the device. As with `updateFireflySlots`, `stateName` must already exist and must have been sent to the device during registration.
 
 ### 8.3 Reset Device
 
@@ -552,8 +556,9 @@ Common public API errors:
 - `404 device_not_found`
 - `409 device_offline`
 - `409 command_in_progress` if queueing is disabled or queue limit is reached.
-- `422 invalid_slot_index`
-- `422 invalid_action`
+- `422 invalid_external_slot_id`
+- `422 invalid_state_name`
+- `422 invalid_pattern`
 - `504 firefly_ack_timeout`
 - `502 firefly_error`, including device error code and description.
 
@@ -618,10 +623,10 @@ Main views:
 - Devices: list of Firefly devices with status, firmware, MAC, last keepalive, enabled flag, and action buttons.
 - Device detail: live status, MQTT metadata, actor state, current task ID, reset/reinitialize controls.
 - Segment editor: configure channel, segment number, first LED index, last LED index.
-- Slot editor: configure slot index, segment, segment position, number of LEDs, optional external identifier, and label.
+- Slot editor: configure internal slot index, required external slot identifier, segment, segment position, number of LEDs, and label.
 - LED states: manage reusable low-level Firefly states.
-- Command presets: map business-friendly actions to LED state and pattern.
-- Manual test panel: select a device and slots, choose action/preset/color, send update, and view ACK/error result.
+- Command presets: map friendly preset names to LED state and pattern.
+- Manual test panel: select a device and slots, choose a configured state, pattern, optional pattern value, or preset, send update, and view ACK/error result.
 - Event log: inspect recent registration, init, update, ACK, error, timeout, and keepalive events.
 
 Frontend should use the OpenAPI schema generated by FastAPI either directly or through generated TypeScript client types.
@@ -693,7 +698,7 @@ Example:
 }
 ```
 
-The Firefly MQTT protocol version is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration. The reference EndOfLine code uses `v01.04`, but the current production firmware version should be confirmed.
+The Firefly MQTT protocol version is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration. The current production firmware protocol version should be confirmed.
 
 The path to this JSON file should be provided by a command-line argument such as `--config config/firefly-appsettings.json`, or by a documented default search path. Environment variables should not be required for normal operation.
 
@@ -703,7 +708,7 @@ Backend tests:
 
 - Unit tests for MQTT topic builders.
 - Unit tests for Pydantic payload serialization aliases.
-- Unit tests for high-level action to Firefly state/pattern translation.
+- Unit tests for state, pattern, pattern value, and preset translation to Firefly MQTT payloads.
 - Actor tests for registration, init slots, slot update ACK, slot update error, timeout, and task ID mismatch recovery.
 - Repository tests against SQLite.
 - FastAPI route tests for public and admin APIs.
@@ -723,12 +728,8 @@ Frontend tests:
 ## 15. Open Questions
 
 - Confirm the current Firefly MQTT protocol version string used by production firmware.
-- Confirm whether PostgreSQL is actually required, or whether SQLite should be the default because the requested deployment is lightweight and file-based.
-- Confirm whether public API slot addressing should use only `slotIndex`, or also support stable external slot identifiers such as `externalSlotId`.
-- Confirm whether public commands should wait synchronously for Firefly ACK before returning, or return immediately with an operation ID for polling. Version 1 currently assumes synchronous wait with timeout.
-- Confirm expected authentication model for integrators and admin users.
 - Confirm whether command queueing per device is acceptable, and what maximum queue length should be enforced.
-- Confirm whether dynamic ad hoc colors from public API calls should create temporary LED states, map to existing presets, or be restricted to configured presets only.
+- Confirm the exact firmware behavior of `patternValue` for each slot LED pattern.
 
 ## 16. Version 1 Milestones
 
