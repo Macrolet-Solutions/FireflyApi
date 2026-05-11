@@ -28,7 +28,7 @@ Required Firefly behavior:
 - One actor instance manages one configured Firefly device.
 - Devices communicate using versioned MQTT topics.
 - Device registration is initiated by the Firefly device over MQTT.
-- The server accepts or rejects registration based on configured device name and MQTT protocol version.
+- The server accepts or rejects registration based on configured device name and `firefly_interface_version`.
 - Registration response includes static LED strip segment definitions and named LED states.
 - After registration, the server initializes slots with a generated `task-id`.
 - Slot updates are serialized per device through `event-id` correlation and ACK/error handling.
@@ -43,19 +43,19 @@ Firefly MQTT topics:
 ```text
 From device:
 cmd/ptm/register-req/+
-cmd/ptm/register-req/{mqttVersion}
-ptm/{mqttVersion}/{deviceName}/ack
-ptm/{mqttVersion}/{deviceName}/error
-ptm/{mqttVersion}/{deviceName}/keepalive
+cmd/ptm/register-req/{firefly_interface_version}
+ptm/{firefly_interface_version}/{deviceName}/ack
+ptm/{firefly_interface_version}/{deviceName}/error
+ptm/{firefly_interface_version}/{deviceName}/keepalive
 
 To device:
-ff/{mqttVersion}/{deviceName}/register-resp
-ff/{mqttVersion}/{deviceName}/init-slots
-ff/{mqttVersion}/{deviceName}/extend-slots
-ff/{mqttVersion}/{deviceName}/update-slot-state
-ff/{mqttVersion}/{deviceName}/update-all-slots
-ff/{mqttVersion}/{deviceName}/release-slots
-ff/{mqttVersion}/{deviceName}/reset
+ff/{firefly_interface_version}/{deviceName}/register-resp
+ff/{firefly_interface_version}/{deviceName}/init-slots
+ff/{firefly_interface_version}/{deviceName}/extend-slots
+ff/{firefly_interface_version}/{deviceName}/update-slot-state
+ff/{firefly_interface_version}/{deviceName}/update-all-slots
+ff/{firefly_interface_version}/{deviceName}/release-slots
+ff/{firefly_interface_version}/{deviceName}/reset
 ```
 
 Firefly MQTT payload concepts:
@@ -124,7 +124,7 @@ Backend modules should be organized around these responsibilities:
 
 - `api.admin`: frontend-facing management endpoints.
 - `api.public`: external integrator endpoints.
-- `core.config`: local application settings, database URL, Firefly protocol version, timeouts, frontend static path, and logging settings.
+- `core.config`: local application settings, database URL, `firefly_interface_version`, timeouts, frontend static path, and logging settings.
 - `db.models`: SQLAlchemy ORM models.
 - `db.repositories`: database persistence operations.
 - `firefly.protocol`: MQTT topics, payload schemas, protocol constants, serializers.
@@ -152,7 +152,7 @@ Each actor should keep these runtime fields:
 - `device_id`: internal database ID.
 - `device_name`: Firefly MQTT device identifier.
 - `status`: unknown, online, offline, register_error.
-- `mqtt_version`: configured server protocol version.
+- `firefly_interface_version`: configured Firefly device interface version used in topic names and registration validation.
 - `current_task_id`: task ID accepted by the device after slot initialization.
 - `slots`: ordered slot configuration for the device.
 - `slot_states`: last known state, pattern, and pattern value for each slot updated through this service.
@@ -202,7 +202,7 @@ Device liveness should also be monitored independently of command timeouts. If a
 
 ### 6.1 Protocol Version
 
-The service must define a configured Firefly MQTT protocol version, for example `v01.04`. A registration request for a different version must be rejected with a registration error response.
+The service must define a configured Firefly device interface version named `firefly_interface_version`, for example `v01.04`. This is the version segment used in Firefly MQTT topic names and registration validation. It is not the generic MQTT broker protocol version. A registration request for a different Firefly interface version must be rejected with a registration error response.
 
 ### 6.2 Topic Builder
 
@@ -687,7 +687,7 @@ Example:
 		"url": "sqlite:///./data/firefly.db"
 	},
 	"firefly": {
-		"mqttProtocolVersion": "v01.04",
+		"firefly_interface_version": "v01.04",
 		"ackTimeoutMs": 7000,
 		"ackMaxRetries": 3,
 		"keepaliveDisconnectAfterSeconds": 300,
@@ -705,7 +705,7 @@ Example:
 }
 ```
 
-The Firefly MQTT protocol version is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration. The current production firmware protocol version should be confirmed.
+The `firefly_interface_version` is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration and is not the generic MQTT protocol version. The current production firmware interface version should be confirmed.
 
 The path to this JSON file should be provided by a command-line argument such as `--config config/firefly-appsettings.json`, or by a documented default search path. Environment variables should not be required for normal operation.
 
@@ -734,7 +734,7 @@ Frontend tests:
 
 ## 15. Open Questions
 
-- Confirm the current Firefly MQTT protocol version string used by production firmware.
+- Confirm the current `firefly_interface_version` string used by production firmware.
 - Confirm whether command queueing per device is acceptable, and what maximum queue length should be enforced.
 - Confirm the exact firmware behavior of `patternValue` for each slot LED pattern.
 
