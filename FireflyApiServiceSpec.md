@@ -164,7 +164,6 @@ Each actor should keep these runtime fields:
 
 The Python actor should implement this state machine:
 
-- `reset`: actor has no known initialized device session.
 - `waiting_ack`: actor has sent one MQTT command that requires ACK and is waiting for ACK, error, or timeout.
 - `active`: actor has initialized slots and can accept commands.
 - `offline`: actor cannot execute commands until registration or keepalive allows reinitialization.
@@ -176,6 +175,8 @@ The pending command should determine what happens after ACK, error, or timeout. 
 When a device actor starts, it must load the configured slots, generate a new `task-id`, publish `init-slots`, and transition to `waiting_ack` with `pending_command.command_type = init_slots`. The `current_task_id` is actor-owned memory for the current physical device session and must not be persisted as active device state. Historical task IDs may be inspected through `firefly_events` payloads for diagnostics.
 
 Registration requests from the device are preemptive and must be accepted from every actor state. When a registration request is received, the actor must assume the physical Firefly controller has reset or restarted. It must discard any pending ACK correlation, complete any waiting caller with a retryable device re-registration failure, clear session-specific runtime state such as `current_task_id`, update registration metadata, publish the registration response, and transition to `waiting_ack` with `pending_command.command_type = register_response`.
+
+Resetting a device session should be modeled as an action, not a top-level actor state. When the actor needs to reset its session, it should clear `current_task_id`, pending ACK correlation, and session-specific metadata, then either publish the next recovery command and enter `waiting_ack` or mark the device `offline` until registration or keepalive allows reinitialization.
 
 Only one MQTT command that requires ACK should be in flight per device actor. Additional API requests should either be queued by the actor mailbox or rejected with a clear conflict response, depending on the final desired behavior. For version 1, queueing through the actor mailbox is recommended.
 
@@ -191,7 +192,7 @@ When an ACK arrives:
 - If the pending command is `register_response`, publish `init-slots` with a new `event-id` and remain in `waiting_ack` for the new `init_slots` pending command.
 - If the pending command is `init_slots`, store the accepted `task-id` and transition to `active`.
 - If the pending command is `update_slot_state` or `update_all_slots`, persist the resulting runtime slot state and transition to `active`.
-- If the pending command is `reset` or `release_slots`, apply the command-specific recovery behavior and transition to `offline` or `reset` as appropriate.
+- If the pending command is `reset` or `release_slots`, apply the command-specific recovery behavior and transition to `offline` or publish the next recovery command and remain in `waiting_ack` as appropriate.
 - If `event-id` does not match, log a warning and keep waiting.
 
 When an error arrives:
@@ -488,8 +489,6 @@ Request:
 }
 ```
 
-The `currentTaskId` field is runtime actor state exposed for diagnostics. It should come from the active in-memory device actor, not from a persisted device table column.
-
 Response:
 
 ```json
@@ -500,6 +499,8 @@ Response:
 	"clientRequestId": "optional-client-correlation-id"
 }
 ```
+
+The `currentTaskId` field is runtime actor state exposed for diagnostics. It should come from the active in-memory device actor, not from a persisted device table column.
 
 The preferred version 1 contract is explicit for integrators while hiding Firefly hardware indexes: callers provide an `externalSlotId`, a configured `stateName`, and optional `pattern` and `patternValue` information. The service resolves `externalSlotId` to the configured internal `slot_index`, validates that the state exists in `firefly_led_states`, validates that the pattern is one of the fixed firmware-supported pattern values, translates the request into Firefly `slot-inx`, `to-state`, `pattern`, and `pattern-value` fields, and sends one MQTT `update-slot-state` command to the device actor.
 
