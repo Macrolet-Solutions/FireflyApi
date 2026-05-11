@@ -38,6 +38,7 @@ from typing import Any
 
 import pykka
 
+from firefly_api.firefly.events import EventLog, EventRecord, EventType, NullEventLog
 from firefly_api.firefly.mqtt import MqttPublisher
 from firefly_api.firefly.protocol import (
     TASK_ID_RECOVERY_ERROR_CODES,
@@ -148,11 +149,13 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         config: DeviceConfig,
         settings: RuntimeSettings,
         publisher: MqttPublisher,
+        event_log: EventLog | None = None,
     ) -> None:
         super().__init__()
         self._config = config
         self._settings = settings
         self._publisher = publisher
+        self._event_log: EventLog = event_log or NullEventLog()
 
         # State machine.
         self.fsm: StateMachine = StateMachine.OFFLINE
@@ -290,12 +293,40 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         self._publish(topic, full)
         return event_id
 
+    def _record(
+        self,
+        event_type: str,
+        event_id: str,
+        *,
+        task_id: str | None = None,
+        payload_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_description: str | None = None,
+    ) -> None:
+        self._event_log.record(
+            EventRecord(
+                device_id=self._config.device_id,
+                event_id=event_id,
+                event_type=event_type,
+                task_id=task_id,
+                payload_json=payload_json,
+                error_code=error_code,
+                error_description=error_description,
+            )
+        )
+
     # ----------------------------------------------------- handlers ----
 
     def _handle_register_request(self, message: dict[str, Any]) -> None:
         request: RegistrationRequestIn = message["request"]
         request_version: str = message["request_version"]
         now = datetime.now(timezone.utc)
+
+        self._record(
+            EventType.REGISTER_REQUEST_RECEIVED,
+            event_id=str(uuid.uuid4()),
+            payload_json=request.model_dump(by_alias=True),
+        )
 
         # Registration is preemptive (§5.3). Discard any in-flight command.
         if self.pending_command and self.pending_command.result_future is not None:
@@ -345,6 +376,11 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         event_id = self._publish_with_new_event_id(topic, base_payload)
+        self._record(
+            EventType.REGISTER_RESPONSE_SENT,
+            event_id=event_id,
+            payload_json={"event-id": event_id, **base_payload},
+        )
         self.pending_command = PendingCommand(
             command_type=CommandType.REGISTER_RESPONSE,
             event_id=event_id,
@@ -358,10 +394,11 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         # status: leave at unknown until init-slots is ACK'd.
 
     def _publish_registration_error(self, description: str) -> None:
+        event_id = str(uuid.uuid4())
         payload = {
             "is-error": True,
             "error-descr": description,
-            "event-id": str(uuid.uuid4()),
+            "event-id": event_id,
             "device-type": self._config.device_type,
             "segments": [],
             "states": [],
@@ -370,9 +407,20 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         self._publish(topic, payload)
+        self._record(
+            EventType.REGISTER_RESPONSE_SENT,
+            event_id=event_id,
+            payload_json=payload,
+            error_description=description,
+        )
 
     def _handle_ack(self, message: dict[str, Any]) -> None:
         event_id = message["event_id"]
+        self._record(
+            EventType.ACK_RECEIVED,
+            event_id=event_id,
+            payload_json={"event-id": event_id},
+        )
         pending = self.pending_command
         if pending is None or pending.event_id != event_id:
             logger.warning(
@@ -421,6 +469,17 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         event_id = message["event_id"]
         error_code = message["error_code"]
         error_descr = message.get("error_descr") or ""
+        self._record(
+            EventType.ERROR_RECEIVED,
+            event_id=event_id,
+            payload_json={
+                "event-id": event_id,
+                "error-code": error_code,
+                "error-descr": error_descr,
+            },
+            error_code=error_code,
+            error_description=error_descr,
+        )
         pending = self.pending_command
         if pending is None or pending.event_id != event_id:
             logger.warning(
@@ -463,6 +522,10 @@ class FireflyDeviceActor(pykka.ThreadingActor):
 
     def _handle_keepalive(self, _message: dict[str, Any]) -> None:
         self.last_keepalive_at = datetime.now(timezone.utc)
+        self._record(
+            EventType.KEEPALIVE_RECEIVED,
+            event_id=str(uuid.uuid4()),
+        )
         self._arm_watchdog()  # reset
 
         # Per §5.3: when keepalive arrives while in offline (and not in
@@ -495,12 +558,26 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         if pending.retry_count < pending.max_retries:
             # Retry: new event-id, republish, reschedule timer.
             new_event_id = self._publish_with_new_event_id(pending.topic, pending.base_payload)
+            self._record(
+                EventType.RETRY,
+                event_id=new_event_id,
+                task_id=pending.task_id,
+                payload_json={"event-id": new_event_id, **pending.base_payload},
+            )
             pending.event_id = new_event_id
             pending.retry_count += 1
             self._arm_command_timeout(new_event_id, pending.timeout_ms)
             return
 
         # Retries exhausted.
+        self._record(
+            EventType.TIMEOUT,
+            event_id=event_id,
+            task_id=pending.task_id,
+            error_description=(
+                f"No ACK after {pending.max_retries + 1} attempts."
+            ),
+        )
         self._fail_pending(
             CommandFailure(
                 event_id=event_id,
@@ -537,6 +614,12 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         event_id = self._publish_with_new_event_id(topic, base_payload)
+        self._record(
+            EventType.UPDATE_SLOT_STATE_SENT,
+            event_id=event_id,
+            task_id=self.current_task_id,
+            payload_json={"event-id": event_id, **base_payload},
+        )
         self.pending_command = PendingCommand(
             command_type=CommandType.UPDATE_SLOT_STATE,
             event_id=event_id,
@@ -575,6 +658,12 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         event_id = self._publish_with_new_event_id(topic, base_payload)
+        self._record(
+            EventType.UPDATE_ALL_SLOTS_SENT,
+            event_id=event_id,
+            task_id=self.current_task_id,
+            payload_json={"event-id": event_id, **base_payload},
+        )
         self.pending_command = PendingCommand(
             command_type=CommandType.UPDATE_ALL_SLOTS,
             event_id=event_id,
@@ -639,6 +728,7 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         self._publish(topic, {})
+        self._record(EventType.RESET_SENT, event_id=event_id, payload_json={})
         self._set_state(StateMachine.OFFLINE, ActorStatus.OFFLINE)
         _complete_future(future, CommandSuccess(event_id=event_id))
 
@@ -685,6 +775,12 @@ class FireflyDeviceActor(pykka.ThreadingActor):
             self._settings.firefly_interface_version, self._config.device_name
         )
         event_id = self._publish_with_new_event_id(topic, base_payload)
+        self._record(
+            EventType.INIT_SLOTS_SENT,
+            event_id=event_id,
+            task_id=task_id,
+            payload_json={"event-id": event_id, **base_payload},
+        )
         self.pending_command = PendingCommand(
             command_type=CommandType.INIT_SLOTS,
             event_id=event_id,

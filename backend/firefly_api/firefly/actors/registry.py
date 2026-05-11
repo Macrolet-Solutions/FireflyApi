@@ -9,7 +9,7 @@ factory, then driven by :meth:`start_all` / :meth:`stop_all`.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 
 import pykka
 from pydantic import ValidationError
@@ -27,6 +27,7 @@ from firefly_api.firefly.actors.device import (
     FireflyDeviceActor,
     RuntimeSettings,
 )
+from firefly_api.firefly.events import EventLog, NullEventLog
 from firefly_api.firefly.mqtt import MqttClient
 from firefly_api.firefly.protocol import (
     REGISTER_REQ_SUBSCRIPTION,
@@ -49,10 +50,12 @@ class ActorRegistry:
         mqtt_client: MqttClient,
         session_factory: sessionmaker[Session],
         settings: RuntimeSettings,
+        event_log: EventLog | None = None,
     ) -> None:
         self._mqtt = mqtt_client
         self._session_factory = session_factory
         self._settings = settings
+        self._event_log: EventLog = event_log or NullEventLog()
         self._actors: dict[str, pykka.ActorRef] = {}
         self._started = False
 
@@ -168,6 +171,7 @@ class ActorRegistry:
             config=config,
             settings=self._settings,
             publisher=self._mqtt,
+            event_log=self._event_log,
         )
         self._actors[config.device_name] = actor_ref
         return actor_ref
