@@ -31,11 +31,11 @@ Required Firefly behavior:
 - The server accepts or rejects registration based on configured device name and `firefly_interface_version`.
 - Registration response includes static LED strip segment definitions and named LED states.
 - After registration, the server initializes slots with a generated `task-id`.
-- On service startup, each enabled device actor must initialize slots by publishing `init-slots` with a newly generated `task-id`.
+- On service startup, each device actor must initialize slots by publishing `init-slots` with a newly generated `task-id`, unless the device has no slots configured (see §5.3).
 - Slot updates are serialized per device through `event-id` correlation and ACK/error handling.
-- If a command does not receive an ACK within the timeout, the actor retries the command up to 3 times before treating the device as disconnected for that command path.
+- If a command does not receive an ACK within the timeout, the actor retries the command up to `ackMaxRetries` times (default 3) before treating the device as offline for that command path. The initial publish does not count as a retry, so the default policy is 1 initial publish + 3 retries = 4 total publishes per command.
 - Device errors such as missing or mismatched task ID cause reinitialization of slots.
-- Keepalive messages update device liveness. If no keepalive has been received for 5 minutes and there is no command activity for the controller, the device should be automatically treated as disconnected.
+- Keepalive messages update device liveness. If no keepalive has been received for `keepaliveDisconnectAfterSeconds` (default 300 s), the device is automatically treated as offline. Only inbound keepalives reset this timer; ACKs, errors, and outbound publishes do not count as liveness signals.
 - Slot configuration and segment configuration are persisted in the database.
 - Runtime device state is actor-owned: current task ID, pending command, last known slot states, and connection state.
 
@@ -52,12 +52,12 @@ ptm/{firefly_interface_version}/{deviceName}/keepalive
 To device:
 ff/{firefly_interface_version}/{deviceName}/register-resp
 ff/{firefly_interface_version}/{deviceName}/init-slots
-ff/{firefly_interface_version}/{deviceName}/extend-slots
 ff/{firefly_interface_version}/{deviceName}/update-slot-state
 ff/{firefly_interface_version}/{deviceName}/update-all-slots
-ff/{firefly_interface_version}/{deviceName}/release-slots
 ff/{firefly_interface_version}/{deviceName}/reset
 ```
+
+The `reset` topic is **fire-and-forget**. The device performs a hard restart equivalent to pressing the physical reset button. The firmware does **not** publish an ACK or error in response. The service treats the publish as immediately completed; there is no `event-id` correlation, no timeout, and no retry for this command.
 
 Firefly MQTT payload concepts:
 
@@ -68,6 +68,7 @@ Firefly MQTT payload concepts:
 - Keepalive: free memory and battery fields.
 - Init slots: event ID, task ID, number of slots, slot definitions.
 - Update slot state: event ID, task ID, list of slot state changes.
+- Reset: empty payload. No `event-id` is required because no ACK is returned.
 
 ## 3. Product Scope
 
@@ -83,7 +84,7 @@ Firefly MQTT payload concepts:
 - Expose admin APIs used by the React frontend.
 - Expose public integration APIs used by external systems.
 - Provide a frontend for device management, slot/segment editing, live device status, and manual slot testing.
-- Persist configuration and recent runtime metadata.
+- Persist configuration. Runtime device state is kept only in the in-memory actor; it is rebuilt on every service start through registration, keepalive, and init-slots flow.
 - Maintain per-device actor state for reliable command serialization and ACK/error handling.
 
 ### 3.2 Out of Scope
@@ -138,7 +139,7 @@ Backend modules should be organized around these responsibilities:
 
 ### 5.1 Actor Registry
 
-The actor registry owns all active Firefly device actors. When an active MQTT broker is configured and connected, it loads enabled devices from the database and starts one actor per device. It also owns the global registration-request subscription:
+The actor registry owns all active Firefly device actors. When an active MQTT broker is configured and connected, it loads all configured devices from the database and starts one actor per device. It also owns the global registration-request subscription:
 
 ```text
 cmd/ptm/register-req/+
@@ -168,57 +169,90 @@ The Python actor should implement this state machine:
 - `active`: actor has initialized slots and can accept commands.
 - `offline`: actor cannot execute commands until registration or keepalive allows reinitialization.
 
-The actor should not use separate top-level states such as `registering`, `initializing_slots`, or `updating_slots` only to represent ACK waiting. Instead, ACK waiting should be represented by `waiting_ack` plus the structured `pending_command.command_type` field. Supported pending command types should include at least `register_response`, `init_slots`, `update_slot_state`, `update_all_slots`, `release_slots`, and `reset`.
+The actor should not use separate top-level states such as `registering`, `initializing_slots`, or `updating_slots` only to represent ACK waiting. Instead, ACK waiting should be represented by `waiting_ack` plus the structured `pending_command.command_type` field. Supported pending command types are `register_response`, `init_slots`, `update_slot_state`, and `update_all_slots`.
+
+The actor tracks two related but distinct values:
+
+- The **state machine state** (`waiting_ack | active | offline`) describes what the actor is currently doing in its command flow. It controls which incoming messages are valid and which transitions are legal.
+- The **status** (`unknown | online | offline | register_error`) is the observable lifecycle value exposed through the public and admin APIs.
+
+Status transitions:
+
+- `unknown`: initial value for a freshly started actor that has not yet had a successful exchange with the device.
+- `online`: set when `init-slots` is ACK'd.
+- `offline`: set when the keepalive watchdog fires, or when ACK retries are exhausted for any command. State machine state is also `offline`.
+- `register_error`: set per the registration rules below. Cleared only by a subsequent valid registration request.
+
+When a keepalive arrives while the state machine is `offline` and `status != register_error`, the actor generates a fresh `task-id`, publishes `init-slots`, and transitions to `waiting_ack` with `pending_command.command_type = init_slots`. Status moves to `online` only when that new `init-slots` is ACK'd.
+
+Both the word `offline` in the state machine and the value `offline` in the status enum refer to the same condition: the actor cannot currently execute commands. The state machine value drives behavior; the status value is what the API exposes.
 
 The pending command should determine what happens after ACK, error, or timeout. For example, ACK for `register_response` should trigger publishing `init-slots`; ACK for `init_slots` should transition the actor to `active`; ACK for `update_slot_state` or `update_all_slots` should update runtime slot state and transition back to `active`.
 
-When a device actor starts, it must load the configured slots, generate a new `task-id`, publish `init-slots`, and transition to `waiting_ack` with `pending_command.command_type = init_slots`. The `current_task_id` is actor-owned memory for the current physical device session and must not be persisted as active device state. Historical task IDs may be inspected through `firefly_events` payloads for diagnostics.
+When a device actor starts, it must load the configured slots. If at least one slot is configured, the actor generates a new `task-id`, publishes `init-slots`, and transitions to `waiting_ack` with `pending_command.command_type = init_slots`. If no slots are configured, the actor does not publish `init-slots`; it remains with state machine `offline` and `status = offline` until slots are added and `:reinitialize` is invoked, or a fresh registration arrives that finds slots configured. The same rule applies after the ACK for a `register_response`: if no slots are configured, the actor skips the `init-slots` step and stays `offline`. The `current_task_id` is actor-owned memory for the current physical device session and must not be persisted as active device state. Historical task IDs may be inspected through `firefly_events` payloads for diagnostics.
 
-Registration requests from the device are preemptive and must be accepted from every actor state. When a registration request is received, the actor must assume the physical Firefly controller has reset or restarted. It must discard any pending ACK correlation, complete any waiting caller with a retryable device re-registration failure, clear session-specific runtime state such as `current_task_id`, update registration metadata, publish the registration response, and transition to `waiting_ack` with `pending_command.command_type = register_response`.
+Registration requests from the device are preemptive and must be accepted from every actor state, including `register_error`. When a registration request is received, the actor must assume the physical Firefly controller has reset or restarted. It must discard any pending ACK correlation, complete any waiting caller with a retryable device re-registration failure, clear session-specific runtime state such as `current_task_id`, and update registration metadata.
+
+The actor then validates the registration:
+
+- If the request's interface version does not match the configured `firefly_interface_version`, the actor publishes a registration error response with a descriptive `error-descr`, sets `status = register_error`, and remains in `offline`. It does not transition to `waiting_ack`. The device can recover only by sending another registration with a matching version.
+- If `firefly_led_states` is empty, the actor cannot produce a valid registration response. It publishes a registration error response with `error-descr` indicating that no LED states are configured, sets `status = register_error`, and remains in `offline`. The device can recover only after the operator configures at least one LED state and the device retries registration.
+- Otherwise the actor publishes the registration response with the configured segments and LED states, sets `status` based on subsequent transitions (see §5.3 state machine), and transitions to `waiting_ack` with `pending_command.command_type = register_response`.
+
+`status = register_error` is cleared the next time a valid registration request is processed (i.e. one that does not hit either rejection branch above). Keepalives and command timeouts do not clear `register_error`.
 
 Resetting a device session should be modeled as an action, not a top-level actor state. When the actor needs to reset its session, it should clear `current_task_id`, pending ACK correlation, and session-specific metadata, then either publish the next recovery command and enter `waiting_ack` or mark the device `offline` until registration or keepalive allows reinitialization.
 
-Only one MQTT command that requires ACK should be in flight per device actor. Additional API requests should either be queued by the actor mailbox or rejected with a clear conflict response, depending on the final desired behavior. For version 1, queueing through the actor mailbox is recommended.
+**Hard reset.** An operator-initiated hard reset (admin `:reset`, §9.6) is preemptive from every actor state. The actor must: cancel any pending command and complete its waiting HTTP caller with `503 device_resetting`; clear `current_task_id`, `pending_command`, and `slot_states`; publish the `reset` MQTT message (no `event-id`, no payload); set `status = offline` and state machine to `offline`. The actor stays alive. The watchdog timer is left armed — it may fire during the device's reboot, but firing while already `offline` is a no-op. Recovery happens when the device finishes its physical reboot and sends a fresh registration request, at which point the normal registration flow resumes.
+
+Only one MQTT command that requires ACK is in flight per device actor at any time. Additional API requests are queued through the actor mailbox. The Pykka mailbox is unbounded; Version 1 does not impose a queue depth limit. Misbehaving clients are expected to be controlled at the network/integration layer.
 
 ### 5.4 ACK, Error, and Timeout Handling
 
-Every MQTT command requiring confirmation must include a generated UUID `event-id`. The actor starts a timeout when publishing. The timeout should default to 7000 ms and be configurable.
+Every MQTT command requiring confirmation must include a generated UUID `event-id`. The actor starts a timeout when publishing. The timeout should default to 7000 ms and be configurable. When a request body specifies `timeoutMs`, that value applies **per attempt**, not as a total wallclock budget; with the default `ackMaxRetries` of 3 the maximum elapsed time for a fully-retried command is approximately `timeoutMs × 4`.
 
-Commands that time out should be retried up to 3 times before the device is marked disconnected. Each retry must use a new `event-id`, publish the MQTT command again, and start a new ACK timeout. The original HTTP request should remain pending while retries are attempted because public command endpoints use synchronous ACK-waiting semantics.
+Commands that time out should be retried up to `ackMaxRetries` times (default 3) before the device is marked offline. The initial publish is not counted as a retry: with the default the actor performs 1 initial publish plus up to 3 retries, for 4 total publishes per command. Each retry must use a new `event-id`, publish the MQTT command again, and start a new ACK timeout. The original HTTP request should remain pending while retries are attempted because public command endpoints use synchronous ACK-waiting semantics.
 
 When an ACK arrives:
 
 - If `event-id` matches the pending command, cancel the timeout and apply the pending command's ACK behavior.
 - If the pending command is `register_response`, publish `init-slots` with a new `event-id` and remain in `waiting_ack` for the new `init_slots` pending command.
 - If the pending command is `init_slots`, store the accepted `task-id` and transition to `active`.
-- If the pending command is `update_slot_state` or `update_all_slots`, persist the resulting runtime slot state and transition to `active`.
-- If the pending command is `reset` or `release_slots`, apply the command-specific recovery behavior and transition to `offline` or publish the next recovery command and remain in `waiting_ack` as appropriate.
+- If the pending command is `update_slot_state` or `update_all_slots`, update the actor's in-memory slot state and transition to `active`.
 - If `event-id` does not match, log a warning and keep waiting.
 
 When an error arrives:
 
 - If `event-id` matches, cancel the timeout and complete the command with a failure.
 - If the error code is `NO_TASK_ID_WHEN_UPDATING_CELLS` or `TASK_ID_MISMATCH_UPDATING_CELLS`, reinitialize slots.
-- Otherwise mark the device offline or disconnected according to the pending command type and recovery behavior.
+- Otherwise mark the device offline according to the pending command type and recovery behavior.
 
 When a timeout expires:
 
 - If retry attempts remain, republish the command with a new `event-id` and continue waiting.
 - If the retry limit has been reached, complete the command with a timeout error.
-- Mark the device offline/disconnected after the retry limit is reached.
+- Mark the device offline after the retry limit is reached.
 - Keep the actor alive so it can recover on registration or keepalive.
 
-Device liveness should also be monitored independently of command timeouts. If a device has no keepalive for 5 minutes and has no recent command activity, mark it disconnected/offline. The device can recover when it registers again or sends a keepalive that triggers reinitialization.
+Device liveness is monitored by a per-actor keepalive watchdog, independent of command timeouts. Only inbound keepalive messages refresh liveness; ACKs, errors, and registrations are processed normally but do not reset the watchdog clock.
+
+Each actor owns a single watchdog timer with `keepaliveDisconnectAfterSeconds` duration (default 300):
+
+- On actor start the watchdog is armed for the first time.
+- On every inbound keepalive, the actor cancels the current timer and reschedules a new one for `keepaliveDisconnectAfterSeconds` from now.
+- If the timer fires, the callback enqueues a `watchdog_fired` message to the actor's mailbox. When the actor processes that message it transitions its in-memory `status` to `offline` and completes any waiting HTTP caller with a `503 device_offline` error. The actor stays alive and can recover when the next registration or keepalive arrives.
+
+Pykka has no first-class scheduled-message primitive, but the actor can use a `threading.Timer` whose callback issues `self.actor_ref.tell({"type": "watchdog_fired"})` and store the timer reference so the next keepalive can cancel it before rescheduling. The timer runs on a daemon thread; the resulting message is processed serially through the mailbox, so no additional locking is needed in the actor.
 
 ## 6. MQTT Protocol
 
 ### 6.1 Protocol Version
 
-The service must define a configured Firefly device interface version named `firefly_interface_version`, for example `v01.04`. This is the version segment used in Firefly MQTT topic names and registration validation. It is not the generic MQTT broker protocol version. A registration request for a different Firefly interface version must be rejected with a registration error response.
+The service must define a configured Firefly device interface version named `firefly_interface_version`. The confirmed production value at the time of writing is `v01.04`. This is the version segment used in Firefly MQTT topic names and registration validation. It is not the generic MQTT broker protocol version. The value lives in operator configuration so it can be changed without a code release if the firmware interface is bumped. A registration request for a different Firefly interface version must be rejected with a registration error response (see §5.3).
 
 ### 6.2 Topic Builder
 
-All MQTT topics must be produced through a single topic builder module to avoid string duplication. Topic names must match the protocol listed in section 2 unless a newer firmware protocol is confirmed.
+All MQTT topics must be produced through a single topic builder module to avoid string duplication. Topic names must match the protocol listed in §2 unless a newer firmware protocol is confirmed.
 
 ### 6.3 Payload Schemas
 
@@ -307,20 +341,43 @@ Example update slot state payload:
 }
 ```
 
+Example update all slots payload:
+
+```json
+{
+	"event-id": "67c7f3a1-1c19-4b4e-babd-a31128707e6f",
+	"task-id": "a9d9e5f5-21ce-4afb-a26e-5dd5f4e9db5c",
+	"to-state": "OFF",
+	"pattern": 0,
+	"pattern-value": 0
+}
+```
+
+The `update-all-slots` payload carries a single `to-state`, `pattern`, and `pattern-value` that the firmware applies to every slot configured on the device. There is no per-slot list. `pattern` is an integer using the same enum as `update-slot-state` (see §6.4).
+
 ### 6.4 Slot LED Patterns
 
-Slot LED patterns are not configurable LED states. They are firmware-defined rendering modes that tell the Firefly device which part of a configured slot should receive the target LED state. The service should expose them as a fixed enum unless a future firmware version adds more values.
+Slot LED patterns are firmware-defined rendering modes that tell the Firefly device which part of a configured slot should receive the target LED state. They are not LED states themselves.
 
-The service should support these pattern values:
+The service supports this fixed pattern enum:
 
-- `0`: full slot.
-- `1`: slot ends. Inferred meaning: apply the state only to the LEDs at the beginning and end of the slot, leaving the middle off or unchanged according to firmware behavior.
-- `2`: slot without ends. Inferred meaning: apply the state to the interior LEDs of the slot while excluding the beginning and end LEDs.
-- `3`: subsegments only. Inferred meaning: apply the state only to a specific subsegment inside the slot, using `pattern-value` as the subsegment selector.
+| Integer | Firmware name | Public API name |
+|---|---|---|
+| `0` | `LED_PATTERN_FULL` | `full` |
+| `1` | `LED_PATTERN_SLOT_ENDS` | `slot_ends` |
+| `2` | `LED_PATTERN_SLOT_NO_ENDS` | `slot_no_ends` |
+| `3` | `LED_PATTERN_SUBSEGMENTS` | `subsegments` |
+| `4` | `LED_PATTERN_MULTICOLOR` | `multicolor` |
 
-LED states define the color and timing behavior, such as solid, blink, fade, or pulse. Patterns define where that state is applied inside the slot. For example, the same `NEEDS-ATTENTION` state can be applied to the full slot or only to the slot ends.
+`pattern-value` is opaque to this service. Its meaning is firmware-defined and depends on the chosen `pattern`. The service must:
 
-The exact LED counts used by `slot_ends`, `slot_no_ends`, and `subsegments` appear to be firmware behavior rather than application behavior. This should be confirmed with Firefly firmware documentation or a hardware test before exposing detailed descriptions in end-user documentation.
+- Accept any non-negative integer for `pattern-value` and forward it to the device unchanged.
+- Not validate `pattern-value` against the chosen `pattern`. Whether a value makes sense for a given pattern is the integrator's responsibility.
+- Default `pattern-value` to `0` when omitted by callers.
+
+Public API documentation should describe `patternValue` as a count whose interpretation depends on `pattern` and refer integrators to the Firefly firmware reference for exact semantics. The service intentionally does not encode these semantics so that future firmware changes to `pattern-value` behavior do not require a service release.
+
+LED states define the color and timing behavior, such as solid, blink, fade, or pulse. Patterns define where (and how) that state is applied within a slot.
 
 ### 6.5 LED States
 
@@ -330,9 +387,17 @@ LED states must be configured by an administrator or integrator before a Firefly
 
 The frontend should provide a blank initial LED state catalog and allow users to create, edit, duplicate, and delete states. The UI may offer optional examples or templates in documentation, but those examples must not be inserted into the database automatically.
 
+LED states are sent to the Firefly device in the registration response (see §6.3). A state added or modified after a device has registered is **not** automatically pushed to that device; the device picks up the new catalog only on its next registration, which means the device must be reset. Segment configuration behaves the same way for the same reason. After editing LED states or segments, the operator triggers re-registration by clicking the device's **Reset** button in the frontend, which calls the admin `:reset` action (§9.6) and publishes the `reset` MQTT message to the device. The physical reset button on the device hardware is the fallback if MQTT is not available.
+
+### 6.6 MQTT Quality of Service
+
+All Firefly MQTT publications and subscriptions use QoS 0 (at-most-once). The Firefly protocol's application-layer `event-id`, ACK, error, and timeout/retry logic provides delivery confirmation; the service does not depend on MQTT-level QoS, retained messages, or Last Will and Testament.
+
 ## 7. Database Model
 
-The database must persist configuration and enough runtime metadata for recovery after service restart. SQLAlchemy models should use normal integer primary keys and database-level uniqueness constraints.
+The database must persist configuration. Runtime device state is not persisted (see §7.2). SQLAlchemy models should use normal integer primary keys and database-level uniqueness constraints.
+
+All `*_at` columns store timestamps as UTC. Application code reading and writing them must use timezone-aware `datetime` values in UTC; never naive local time. The API serializes them to the ISO 8601 millisecond format defined in §8.
 
 Recommended tables:
 
@@ -343,14 +408,13 @@ Recommended tables:
 - `host`
 - `port`
 - `username`
-- `password_secret_ref` or encrypted password field
+- `password`: stored as plain text. See §12 for the rationale.
 - `use_tls`
 - `client_id`
-- `enabled`
 - `created_at`
 - `updated_at`
 
-Version 1 can support one active broker, but the schema may allow multiple broker profiles.
+Version 1 permits exactly one row in this table. The admin `POST /api/v1/admin/mqtt-brokers` endpoint rejects creating a second broker with `409 broker_already_configured`. PUT updates the single existing row. DELETE is supported only when no `firefly_devices` reference the broker (see §7.8).
 
 ### 7.2 `firefly_devices`
 
@@ -358,17 +422,13 @@ Version 1 can support one active broker, but the schema may allow multiple broke
 - `name`: unique Firefly MQTT device identifier, such as `FF01`.
 - `display_name`
 - `description`
-- `status`: unknown, online, offline, register_error.
-- `enabled`
 - `mqtt_broker_id`
-- `mac_address`
-- `firmware_version`
-- `registered_at`
-- `last_keepalive_at`
-- `last_error_code`
-- `last_error_description`
 - `created_at`
 - `updated_at`
+
+This table holds only durable configuration. Runtime device state (status, MAC address, firmware version, last registration/keepalive times, last error) is owned by the in-memory actor and is not persisted, because every actor boot re-runs the registration/init-slots sequence and any persisted snapshot would be stale.
+
+There is no `enabled` flag. Every configured device has an actor started at process boot (assuming MQTT is connected). To remove a device from operation, delete its row; cascading rules in §7.8 remove dependent segments, slots, and events.
 
 ### 7.3 `firefly_segments`
 
@@ -383,21 +443,36 @@ Version 1 can support one active broker, but the schema may allow multiple broke
 
 This maps directly to the Firefly segment configuration returned during registration. `first_led_index` and `last_led_index` are 1-based inclusive LED indexes. Their relative order indicates segment direction, but slot ordering must always increment from the smaller LED index toward the higher LED index.
 
+Validation rules:
+
+- `UNIQUE(device_id, channel_num, segment_num_in_channel)`. Within a device, the `(channel, segment-in-channel)` pair must be unique.
+- `first_led_index >= 1` and `last_led_index >= 1`. `first_led_index` may be lower or higher than `last_led_index` (see §6.3 for direction semantics). The two may be equal only when a single-LED segment is legitimate for the deployment.
+- Segments on the same `channel_num` of the same device must not overlap in LED range. Two segments overlap when their `[min(first, last), max(first, last)]` ranges intersect.
+
 ### 7.4 `firefly_slots`
 
 - `id`
 - `device_id`
 - `segment_id`
-- `slot_index`: required internal 1-based index sent to the Firefly device.
+- `slot_index`: internal 1-based index sent to the Firefly device. Server-assigned, not supplied by clients.
 - `external_slot_id`: required business/integrator slot identifier used by the public API.
 - `label`
-- `segment_position`
-- `num_leds`
-- `enabled`
+- `segment_position`: required 1-based position within the segment, expressed in logical LED order (from the smaller LED index toward the higher LED index).
+- `num_leds`: required, must be `>= 1`.
 - `created_at`
 - `updated_at`
 
-Slot ordering must be deterministic. This service should store `slot_index` explicitly, validate uniqueness per device, and send the configured 1-based `slot_index` to Firefly as `slot-inx`. For each segment, `slot_index` ordering must follow logical LED order from the smaller LED index to the higher LED index, even when the segment's `first_led_index` is greater than `last_led_index`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
+Validation rules:
+
+- `external_slot_id` must match the regex `^[A-Za-z0-9_-]{1,64}$` and be unique per device.
+- `slot_index` is unique per device and assigned **append-only** by the server on create: the server picks the next free 1-based integer in the device. There is no requirement that `slot_index` values within a segment reflect logical LED order; logical LED order is determined entirely by `segment_position`. Clients must not send `slot_index` on POST or PUT.
+- A slot belongs to exactly one segment and may not span segments. `segment_id` is immutable on PUT; to move a slot to a different segment, delete it and recreate it.
+- `segment_position` is immutable on PUT. To change a slot's position within its segment, delete it and recreate it.
+- The slot's LED range within its segment is `[segment_position, segment_position + num_leds - 1]`. The range must fit inside the segment, i.e. `segment_position + num_leds - 1 <= segment_led_count`, where `segment_led_count = abs(last_led_index - first_led_index) + 1`.
+- Slots in the same segment may not overlap in their LED ranges.
+- Mutable PUT fields: `external_slot_id`, `label`, `num_leds`. Changes to `num_leds` must re-check the overlap rule above.
+
+The configured `slot_index` is sent to Firefly as `slot-inx`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
 
 ### 7.5 `firefly_led_states`
 
@@ -409,7 +484,6 @@ Slot ordering must be deterministic. This service should store `slot_index` expl
 - `color1_fade_down_ms`
 - `repeat_after_ms`
 - `num_repetitions`
-- `is_system`
 - `created_at`
 - `updated_at`
 
@@ -425,39 +499,47 @@ Slot ordering must be deterministic. This service should store `slot_index` expl
 
 This table maps deployment-defined preset names to low-level device state and pattern values.
 
-### 7.7 `firefly_slot_runtime_states`
+### 7.7 `firefly_events`
+
+Each row records a single MQTT message or actor lifecycle moment (publish, receipt, timeout, retry). Rows are insert-only; there are no in-place status transitions. A logical command therefore spans multiple rows correlated by `event_id`.
 
 - `id`
 - `device_id`
-- `slot_id`
-- `current_state_name`
-- `current_pattern`
-- `current_pattern_value`
-- `last_updated_at`
-
-This table is useful for frontend display and service restart recovery. The actor remains the source of truth while running.
-
-### 7.8 `firefly_events`
-
-- `id`
-- `device_id`
-- `event_id`
-- `event_type`: registration, init_slots, update_slot_state, update_all_slots, reset, ack, error, timeout, keepalive.
-- `status`: pending, acked, failed, timed_out.
-- `request_payload_json`
-- `response_payload_json`
-- `error_code`
-- `error_description`
+- `event_id`: correlation UUID. Outbound commands (`register_response_sent`, `init_slots_sent`, `update_slot_state_sent`, `update_all_slots_sent`, `retry`) generate or reuse this UUID. The matching `ack_received`, `error_received`, and `timeout` rows carry the same `event_id` so a command and its outcome can be joined.
+- `event_type`: one of `register_request_received`, `register_response_sent`, `init_slots_sent`, `update_slot_state_sent`, `update_all_slots_sent`, `reset_sent`, `ack_received`, `error_received`, `keepalive_received`, `timeout`, `retry`. The `reset_sent` rows carry a generated UUID in `event_id` for log identification only; no ACK correlation row will follow.
+- `task_id`: nullable. Present on `init_slots_sent`, `update_slot_state_sent`, `update_all_slots_sent`.
+- `payload_json`: nullable. Full JSON body of the MQTT message for inbound and outbound rows.
+- `error_code`: nullable. Set on `error_received` rows.
+- `error_description`: nullable. Set on `error_received` rows.
 - `created_at`
-- `completed_at`
 
-This table should be bounded by retention settings so it does not grow indefinitely.
+Indexes:
+
+- `(device_id, created_at DESC)` for log queries.
+- `(event_id)` for command-outcome correlation.
+
+Retention is enforced by a daily background task (single-process scheduled job, for example APScheduler) that runs at a fixed UTC time (suggested 03:00 UTC) and deletes rows where `created_at < now - events.retentionDays` (see §13). The job runs in the same process as FastAPI; no external cron is required.
+
+### 7.8 Foreign Key Behavior
+
+| Parent | Child | On parent delete |
+|---|---|---|
+| `mqtt_brokers` | `firefly_devices` | `RESTRICT` |
+| `firefly_devices` | `firefly_segments` | `CASCADE` |
+| `firefly_devices` | `firefly_slots` | `CASCADE` |
+| `firefly_devices` | `firefly_events` | `CASCADE` |
+| `firefly_segments` | `firefly_slots` | `RESTRICT` |
+| `firefly_led_states` | `firefly_command_presets` | `RESTRICT` |
+
+`RESTRICT` deletes return `409 in_use` from the admin API with a message indicating which dependent rows block the deletion (e.g. "broker has 3 assigned devices"). Cascading deletes are silent at the database layer and produce a successful 204 response.
 
 ## 8. Public Integration API
 
 Public endpoints are intended for external applications that want to control Firefly devices without knowing MQTT details. They should be stable, documented through OpenAPI, and versioned under `/api/v1/public`.
 
 Public command endpoints must use synchronous ACK-waiting semantics for version 1. The HTTP request should remain open until the Firefly device ACKs the MQTT command, returns a Firefly error, or the configured ACK timeout expires. A successful ACK should return a success response, a Firefly error should return a `502 firefly_error`, and an ACK timeout should return `504 firefly_ack_timeout`.
+
+All timestamps exchanged through the public and admin APIs use **RFC 3339 / ISO 8601 in UTC with a trailing `Z` and millisecond precision**, for example `2026-05-07T10:15:00.123Z`. Inputs must be UTC; the service rejects local-time or offset-suffixed timestamps in request bodies. Outputs are always UTC. This convention is shared by every endpoint in §8 and §9.
 
 ### 8.1 Update Firefly Slots
 
@@ -503,11 +585,14 @@ Response:
 	"deviceName": "FF01",
 	"status": "updated",
 	"eventId": "67c7f3a1-1c19-4b4e-babd-a31128707e6f",
+	"currentTaskId": "a9d9e5f5-21ce-4afb-a26e-5dd5f4e9db5c",
 	"clientRequestId": "optional-client-correlation-id"
 }
 ```
 
-The `currentTaskId` field is runtime actor state exposed for diagnostics. It should come from the active in-memory device actor, not from a persisted device table column.
+The `currentTaskId` field is runtime actor state exposed for diagnostics. It comes from the active in-memory device actor, not from a persisted device table column.
+
+`timeoutMs` is per-attempt (see §5.4); with the default `ackMaxRetries` of 3 a fully-retried command may keep the HTTP request open for approximately `timeoutMs × 4`.
 
 The preferred version 1 contract is explicit for integrators while hiding Firefly hardware indexes: callers provide an `externalSlotId`, a configured `stateName`, and optional `pattern` and `patternValue` information. The service resolves `externalSlotId` to the configured internal `slot_index`, validates that the state exists in `firefly_led_states`, validates that the pattern is one of the fixed firmware-supported pattern values, translates the request into Firefly `slot-inx`, `to-state`, `pattern`, and `pattern-value` fields, and sends one MQTT `update-slot-state` command to the device actor.
 
@@ -515,14 +600,17 @@ The public API must not accept Firefly `slotIndex` directly. `slot_index` is an 
 
 If `pattern` is omitted, the service should default it to `full`. If `patternValue` is omitted, the service should default it to `0`. For patterns where firmware gives `pattern-value` a special meaning, callers may provide a non-zero `patternValue`.
 
-The `stateName` must already be configured and must have been sent to the device during registration. For example, turning a slot off is not a built-in command unless the installation has configured an LED state such as `OFF` with RGB `0x000000` and the device has registered with that state.
+The `stateName` must already exist in `firefly_led_states`. LED states are sent to the device only during registration, so a state added after the device registered is not yet known to the firmware and using it will result in a Firefly error from the device; see §6.5. For example, turning a slot off is not a built-in command unless the installation has configured an LED state such as `OFF` with RGB `0x000000` and the device has been registered with that state in its catalog.
 
-Supported pattern values for the public API:
+Supported pattern values for the public API (full mapping in §6.4):
 
-- `full`: maps to Firefly pattern `0`.
+- `full`: maps to Firefly pattern `0`. `patternValue` is ignored by firmware; the service still forwards whatever is sent.
 - `slot_ends`: maps to Firefly pattern `1`.
 - `slot_no_ends`: maps to Firefly pattern `2`.
-- `subsegments`: maps to Firefly pattern `3` and requires `patternValue`.
+- `subsegments`: maps to Firefly pattern `3`.
+- `multicolor`: maps to Firefly pattern `4`.
+
+`patternValue` is forwarded to the device as an opaque non-negative integer. Its meaning depends on the chosen `pattern` and is firmware-defined; the service does not validate or interpret it.
 
 Optional higher-level presets may be added as a convenience layer, but they should resolve to the same explicit fields before reaching the actor. For example, a preset named `warning` may resolve to `stateName: "NEEDS-ATTENTION"`, `pattern: "slot_ends"`, and a specific `patternValue`. Presets should not replace direct state-based control in the core public API.
 
@@ -544,17 +632,9 @@ Request:
 }
 ```
 
-This endpoint applies the same configured state and pattern to every enabled slot on the device. As with `updateFireflySlots`, `stateName` must already exist and must have been sent to the device during registration.
+This endpoint applies the same configured state and pattern to every slot the firmware currently has in its slot table; the service does not filter the list. As with `updateFireflySlots`, `stateName` must already exist in `firefly_led_states`; see §6.5 for how new LED states reach the device.
 
-### 8.3 Reset Device
-
-```http
-POST /api/v1/public/fireflies/{deviceName}:reset
-```
-
-Publishes the Firefly reset command and marks the device disconnected until it registers or sends keepalive again.
-
-### 8.4 Get Device Status
+### 8.3 Get Device Status
 
 ```http
 GET /api/v1/public/fireflies/{deviceName}/status
@@ -568,24 +648,38 @@ Response:
 	"status": "online",
 	"firmwareVersion": "1.2.3",
 	"macAddress": "AABBCCDDEEFF",
-	"registeredAt": "2026-05-07T10:15:00Z",
-	"lastKeepaliveAt": "2026-05-07T10:15:25Z",
+	"registeredAt": "2026-05-07T10:15:00.000Z",
+	"lastKeepaliveAt": "2026-05-07T10:15:25.142Z",
 	"currentTaskId": "a9d9e5f5-21ce-4afb-a26e-5dd5f4e9db5c"
 }
 ```
 
-### 8.5 Validation and Error Responses
+All fields except `deviceName` and `status` are nullable and reflect what the actor has observed in the current service session. When the actor has just started and has not yet received a registration, keepalive, or ACK from the device, `status` is `"unknown"` and every other field is `null`. None of these values are read from the database.
+
+### 8.4 Validation and Error Responses
+
+All public and admin error responses use this JSON shape:
+
+```json
+{
+	"errorCode": "device_not_found",
+	"errorDescription": "no device named FF99",
+	"details": {}
+}
+```
+
+`errorCode` is a stable machine-readable token from the list below. `errorDescription` is a human-readable message and may vary across builds. `details` is an optional object for additional context (for example, the Firefly device's `error-code` and `error-descr` on `502 firefly_error`).
 
 Common public API errors:
 
 - `404 device_not_found`
 - `409 device_offline`
-- `409 command_in_progress` if queueing is disabled or queue limit is reached.
 - `422 invalid_external_slot_id`
 - `422 invalid_state_name`
 - `422 invalid_pattern`
+- `502 firefly_error`, with device error code and description in `details`.
+- `503 broker_unavailable` when there is no usable MQTT broker connection. Covers all of: no broker row configured, broker connection currently down, or broker still reconnecting. Distinct from `409 device_offline`, which means the specific device is silent while the broker is reachable.
 - `504 firefly_ack_timeout`
-- `502 firefly_error`, including device error code and description.
 
 Public endpoints should never expose raw Python tracebacks or internal actor details.
 
@@ -597,8 +691,10 @@ Recommended endpoints:
 
 ```text
 GET    /api/v1/admin/mqtt-brokers
+GET    /api/v1/admin/mqtt-brokers/{brokerId}
 POST   /api/v1/admin/mqtt-brokers
 PUT    /api/v1/admin/mqtt-brokers/{brokerId}
+DELETE /api/v1/admin/mqtt-brokers/{brokerId}
 POST   /api/v1/admin/mqtt-brokers/{brokerId}:test-connection
 
 GET    /api/v1/admin/fireflies
@@ -636,20 +732,190 @@ GET    /api/v1/admin/events
 GET    /api/v1/admin/events/{eventId}
 ```
 
+Standard CRUD endpoints follow conventional REST semantics with JSON bodies that mirror the database models from §7, omitting secrets. The subsections below define the non-CRUD action endpoints, which all use the verb-colon form.
+
+### 9.1 Test MQTT Broker Connection
+
+```http
+POST /api/v1/admin/mqtt-brokers/{brokerId}:test-connection
+```
+
+Request body: empty.
+
+Opens a transient MQTT connection using the stored broker configuration, waits for CONNACK with a bounded timeout (5000 ms), and disconnects immediately. Does not affect the active broker connection or running actors.
+
+Response on success:
+
+```json
+{
+	"brokerId": 1,
+	"success": true,
+	"connectedAt": "2026-05-11T10:15:00.000Z"
+}
+```
+
+Response on failure: HTTP 502 with body:
+
+```json
+{
+	"brokerId": 1,
+	"success": false,
+	"errorCode": "broker_unreachable",
+	"errorDescription": "connect timeout after 5000 ms"
+}
+```
+
+Possible `errorCode` values: `broker_unreachable`, `broker_auth_failed`, `broker_tls_failed`, `broker_protocol_error`.
+
+### 9.2 Start Device Actor
+
+```http
+POST /api/v1/admin/fireflies/{deviceId}:start-actor
+```
+
+Request body: empty.
+
+Starts the actor for the device if it is not already running. The actor runs the boot sequence in §5.3 (load slots, generate `task-id`, publish `init-slots`, enter `waiting_ack`). If the device has no slots configured, the actor still starts but skips the `init-slots` publish (see §5.3). Idempotent.
+
+Returns 409 `broker_not_connected` if there is no active MQTT broker connection.
+
+Response:
+
+```json
+{
+	"deviceId": 1,
+	"actorStatus": "started"
+}
+```
+
+`actorStatus` is one of `started` or `already_running`. This endpoint does not wait for `init-slots` ACK; the boot sequence runs asynchronously in the actor. Use `:reinitialize` to wait for ACK.
+
+### 9.3 Stop Device Actor
+
+```http
+POST /api/v1/admin/fireflies/{deviceId}:stop-actor
+```
+
+Request body: empty.
+
+Stops the actor cleanly: cancels any pending command and its watchdog timer, completes any waiting HTTP caller with a `503 actor_stopped` error, and removes the actor from the registry. The device row in `firefly_devices` is left untouched; a subsequent `:start-actor` (or a backend restart) re-creates the actor. Idempotent.
+
+Response:
+
+```json
+{
+	"deviceId": 1,
+	"actorStatus": "stopped"
+}
+```
+
+`actorStatus` is one of `stopped` or `already_stopped`.
+
+### 9.4 Reinitialize Device
+
+```http
+POST /api/v1/admin/fireflies/{deviceId}:reinitialize
+```
+
+Request:
+
+```json
+{
+	"timeoutMs": 7000
+}
+```
+
+`timeoutMs` is optional and overrides `ackTimeoutMs` for this single command (per-attempt; see §5.4). Use after changing slot configuration so the device picks up the new slot layout. Segment configuration and the LED state catalog are sent only in the registration response; to apply changes to those, the device must re-register, which is done by triggering `:reset` (§9.6) — `:reinitialize` will not push them.
+
+Instructs the actor to generate a new `task-id` and publish `init-slots`. Uses synchronous ACK-waiting semantics: the HTTP request remains open until ACK, error, or timeout.
+
+Response:
+
+```json
+{
+	"deviceId": 1,
+	"status": "reinitialized",
+	"eventId": "67c7f3a1-1c19-4b4e-babd-a31128707e6f",
+	"currentTaskId": "a9d9e5f5-21ce-4afb-a26e-5dd5f4e9db5c"
+}
+```
+
+Error mapping matches the public command endpoints: 502 `firefly_error`, 504 `firefly_ack_timeout`, 409 `device_offline`, 409 `actor_not_running`.
+
+### 9.5 Test Slot Update
+
+```http
+POST /api/v1/admin/fireflies/{deviceId}/slots:test
+```
+
+Used by the manual test panel in the UI. Behaves like the public `updateFireflySlots` endpoint (§8.1) but accepts internal `slotId` values rather than `externalSlotId` because the admin UI works with database identifiers.
+
+Request:
+
+```json
+{
+	"slots": [
+		{
+			"slotId": 7,
+			"stateName": "NEEDS-ATTENTION",
+			"pattern": "slot_ends",
+			"patternValue": 10
+		}
+	],
+	"timeoutMs": 7000
+}
+```
+
+Defaults and validation rules for `pattern`, `patternValue`, and `stateName` are identical to §8.1.
+
+Response: identical shape to §8.1 minus `clientRequestId`, which is not part of the admin request and is not echoed back.
+
+### 9.6 Reset Device
+
+```http
+POST /api/v1/admin/fireflies/{deviceId}:reset
+```
+
+Request body: empty.
+
+Publishes the `reset` MQTT message (§2) to the device, which triggers a hard restart equivalent to pressing the physical reset button. This is the supported way to make a device pick up changes to LED state catalog or segment configuration, since those values are sent only in the registration response (see §6.5).
+
+This action is fire-and-forget at the MQTT layer — the device does not ACK and no timeout/retry is applied. The endpoint returns as soon as the MQTT publish has been handed to the client library. The actor performs the steps described under "Hard reset" in §5.3 before returning: cancels any pending command (the waiting HTTP caller receives `503 device_resetting`), clears `current_task_id` / `pending_command` / `slot_states`, sets `status = offline`, and waits for the device's next registration.
+
+Response:
+
+```json
+{
+	"deviceId": 1,
+	"status": "reset_published",
+	"eventId": "67c7f3a1-1c19-4b4e-babd-a31128707e6f"
+}
+```
+
+`eventId` is the UUID written to `firefly_events.event_id` on the `reset_sent` row (§7.7) for traceability; it is not used for any ACK correlation.
+
+Errors:
+
+- `409 actor_not_running` if no actor exists for the device.
+- `503 broker_unavailable` if there is no usable MQTT broker connection.
+
+Because the device is about to reboot, callers should expect `GET /status` to report `offline` continuously until the device finishes booting, re-registers, and the subsequent `init-slots` is ACK'd, at which point status transitions to `online` (see the status rules in §5.3).
+
+
 ## 10. Frontend Requirements
 
 The React frontend should be an operational management tool, not a marketing site. It should prioritize dense but clear information, predictable navigation, and fast configuration workflows.
 
-The frontend must include the Firefly product logo from `logo-firefly.png`. The logo should be treated as a first-class brand asset and included in the React application's static assets so it is served correctly by the FastAPI backend after the frontend is built. It should appear in the main application shell, such as the top navigation bar or sidebar header, and may also be used on login, loading, or empty-state screens where branding is appropriate. The UI should preserve the logo's aspect ratio, provide accessible alternative text such as `Firefly`, and avoid recoloring or distorting the image.
+The frontend must include the Firefly product logo from `logo-firefly.png`. The source file ships alongside this specification document (same directory). During the build it must be copied into the React application's static assets directory (for example `frontend/src/assets/logo-firefly.png`) so it is bundled by Vite/CRA and served correctly by the FastAPI backend after the frontend is built. It should appear in the main application shell, such as the top navigation bar or sidebar header, and may also be used on login, loading, or empty-state screens where branding is appropriate. The UI should preserve the logo's aspect ratio, provide accessible alternative text such as `Firefly`, and avoid recoloring or distorting the image.
 
 Main views:
 
 - Dashboard: MQTT broker connection, device count by status, recent errors/timeouts.
-- Devices: list of Firefly devices with status, firmware, MAC, last keepalive, enabled flag, and action buttons.
-- Device detail: live status, MQTT metadata, actor state, current task ID, reset/reinitialize controls.
-- Segment editor: configure channel, segment number, first LED index, last LED index.
-- Slot editor: configure internal slot index, required external slot identifier, segment, segment position, number of LEDs, and label.
-- LED states: manage reusable low-level Firefly states.
+- Devices: list of Firefly devices with status, firmware, MAC, last keepalive, and action buttons.
+- Device detail: live status, MQTT metadata, actor state, current task ID, **Reset** control (calls `:reset`, §9.6), reinitialize control.
+- Segment editor: configure channel, segment number, first LED index, last LED index. Saving changes shows a banner reminding the operator that the device must be reset (via the **Reset** button on the device detail page) for segment changes to take effect.
+- Slot editor: configure the required external slot identifier, segment, segment position, number of LEDs, and label. `slot_index` is server-assigned and is shown read-only.
+- LED states: manage reusable low-level Firefly states. Saving changes shows the same reset-required banner as the segment editor.
 - Command presets: map friendly preset names to LED state and pattern.
 - Manual test panel: select a device and slots, choose a configured state, pattern, optional pattern value, or preset, send update, and view ACK/error result.
 - Event log: inspect recent registration, init, update, ACK, error, timeout, and keepalive events.
@@ -661,14 +927,17 @@ Frontend should use the OpenAPI schema generated by FastAPI either directly or t
 On startup:
 
 1. Load application configuration from the local JSON configuration file.
-2. Open the configured local database.
-3. Load the active MQTT broker configuration from the `mqtt_brokers` table.
-4. If an active MQTT broker exists, connect to it and subscribe to the registration request topic.
-5. If no active MQTT broker exists, start the backend and frontend in a not-configured MQTT state so the broker can be created through the UI.
-6. Load enabled Firefly devices from the database.
-7. Start one actor per enabled device after MQTT is connected.
-8. Each actor loads its slots, generates a new `task-id`, publishes `init-slots`, and waits for ACK. The actor must do this on every startup because `current_task_id` is not persisted as active state across service processes.
-9. Serve FastAPI routes and the React static frontend.
+2. Open the configured local database. If the SQLite file does not yet exist at the configured path, create it (along with its parent directory).
+3. Run `alembic upgrade head` against the database. If migrations fail, abort startup with a clear log message; do not proceed to MQTT or actor initialization with a partial schema.
+4. Load the active MQTT broker configuration from the `mqtt_brokers` table.
+5. If an active MQTT broker exists, connect to it and subscribe to the registration request topic.
+6. If no active MQTT broker exists, start the backend and frontend in a not-configured MQTT state so the broker can be created through the UI.
+7. Load configured Firefly devices from the database.
+8. Start one actor per device after MQTT is connected.
+9. Each actor loads its slots, generates a new `task-id`, publishes `init-slots`, and waits for ACK (or skips the publish if no slots are configured; see §5.3). The actor must do this on every startup because `current_task_id` is not persisted as active state across service processes.
+10. Serve FastAPI routes and the React static frontend.
+
+Broker configuration is treated as fixed at process start. Creating or changing the broker row in `mqtt_brokers` does not take effect in a running backend; an administrator must restart the backend for the new broker configuration to be loaded and for actors to start. This is deliberate — it keeps the broker connection state simple in Version 1.
 
 On shutdown:
 
@@ -685,8 +954,8 @@ Version 1 should include at minimum:
 - No API key requirement for version 1 unless a later deployment requirement introduces one.
 - The service is expected to run inside a secure Macrolet/customer environment with network-level access control.
 - Optional application-level authentication may be added later, but it is not part of the Firefly firmware protocol and should not be confused with device registration or MQTT authentication.
-- Secrets loaded from a local JSON configuration file or stored encrypted in the local database, depending on the setting.
-- Passwords and MQTT credentials must not be returned by API responses.
+- MQTT broker credentials are stored as **plain text** in the `mqtt_brokers` table. The deployment relies on operating-system filesystem permissions on the SQLite database file and on network-level access control around the host; no application-level encryption is applied. This is a deliberate Version 1 choice.
+- Passwords and MQTT credentials must never be returned in API responses. Admin GETs for `mqtt_brokers` must redact the password field.
 - Request/response logging must avoid logging secrets.
 
 Future versions may add user accounts, roles, and OAuth/OIDC integration.
@@ -695,7 +964,7 @@ Future versions may add user accounts, roles, and OAuth/OIDC integration.
 
 The service should use a local JSON configuration file instead of environment variables. The target deployment is a secure environment, and a file-based configuration is easier to inspect, back up, and support on site.
 
-MQTT broker connection settings should not be duplicated in the application configuration file. They belong in the `mqtt_brokers` database table so they can be managed from the frontend and persisted with the rest of the Firefly configuration. On startup, the backend should load the active broker from `mqtt_brokers`. If no active broker exists, the backend should still start, show the MQTT status as not configured, and allow an administrator or integrator to create the broker configuration through the frontend.
+MQTT broker connection settings live in the `mqtt_brokers` database table (see §7.1), not in this configuration file, so they can be managed from the frontend. The single configured broker is loaded once at process start. If no broker row exists, the backend still starts in a not-configured state so the broker can be created through the UI, but a backend restart is required after the broker is created before actors will run (see §11).
 
 Recommended application configuration file: `config/firefly-appsettings.json`.
 
@@ -710,8 +979,7 @@ Example:
 		"firefly_interface_version": "v01.04",
 		"ackTimeoutMs": 7000,
 		"ackMaxRetries": 3,
-		"keepaliveDisconnectAfterSeconds": 300,
-		"commandQueueLimitPerDevice": 100
+		"keepaliveDisconnectAfterSeconds": 300
 	},
 	"events": {
 		"retentionDays": 30
@@ -725,9 +993,16 @@ Example:
 }
 ```
 
-The `firefly_interface_version` is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration and is not the generic MQTT protocol version. The current production firmware interface version should be confirmed.
+The `firefly_interface_version` is an application-level setting because it controls the topic names and registration validation logic. It is not the MQTT broker connection configuration and is not the generic MQTT protocol version. See §6.1 for the confirmed production value.
 
-The path to this JSON file should be provided by a command-line argument such as `--config config/firefly-appsettings.json`, or by a documented default search path. Environment variables should not be required for normal operation.
+`ackMaxRetries` counts retries only and does not include the initial publish. With the default value of 3, the actor performs 1 initial publish plus up to 3 retries (4 total publishes) before completing the command with a timeout error and marking the device offline.
+
+The path to this JSON file is resolved in this order of precedence:
+
+1. The `--config <path>` command-line argument, if supplied.
+2. The default path `./config/firefly-appsettings.json` relative to the process working directory.
+
+If neither produces a readable file, startup aborts with a clear error. Environment variables are not used for normal operation.
 
 ## 14. Testing Requirements
 
@@ -755,9 +1030,7 @@ Frontend tests:
 
 ## 15. Open Questions
 
-- Confirm the current `firefly_interface_version` string used by production firmware.
-- Confirm whether command queueing per device is acceptable, and what maximum queue length should be enforced.
-- Confirm the exact firmware behavior of `patternValue` for each slot LED pattern.
+None at this time. Earlier open questions about `firefly_interface_version` and `patternValue` semantics have been resolved in §6.1 and §6.4 respectively. Version 1 deliberately leaves the actor mailbox unbounded; future versions may revisit if integration patterns require backpressure.
 
 ## 16. Version 1 Milestones
 
@@ -766,7 +1039,6 @@ Frontend tests:
 - Create FastAPI project structure.
 - Configure SQLAlchemy, Alembic, and database models.
 - Add settings management.
-- Add health endpoint.
 - Add basic admin CRUD for devices, segments, slots, LED states, and command presets.
 
 ### Milestone 2: MQTT Protocol Layer
@@ -782,12 +1054,12 @@ Frontend tests:
 - Implement actor registry.
 - Implement per-device actor state machine.
 - Implement registration, init slots, update slot state, reset, keepalive, ACK, error, and timeout handling.
-- Persist device runtime metadata.
+- Expose actor-owned runtime state (status, MAC, firmware, last keepalive, current task ID) through the device status endpoint without persisting it.
 
 ### Milestone 4: Public API
 
 - Implement `updateFireflySlots` endpoint.
-- Implement update all slots, reset, and status endpoints.
+- Implement update all slots and status endpoints.
 - Add OpenAPI examples.
 
 ### Milestone 5: Frontend
