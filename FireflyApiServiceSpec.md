@@ -1034,48 +1034,77 @@ None at this time. Earlier open questions about `firefly_interface_version` and 
 
 ## 16. Version 1 Milestones
 
-### Milestone 1: Backend Foundation
+These milestones are structured for incremental code generation: each phase produces a runnable, testable artifact, and each phase boundary is a natural review point. Phases are intended to be executed sequentially with no backtracking.
 
-- Create FastAPI project structure.
-- Configure SQLAlchemy, Alembic, and database models.
-- Add settings management.
-- Add basic admin CRUD for devices, segments, slots, LED states, and command presets.
+### Phase 1: Foundation and Admin CRUD
 
-### Milestone 2: MQTT Protocol Layer
+Goal: a runnable backend that can be configured through HTTP, with persistence working end-to-end and no MQTT involvement yet.
 
-- Implement topic builder.
-- Implement Pydantic MQTT payload models.
-- Implement MQTT client wrapper.
-- Add registration request subscription.
-- Add tests for topic and payload compatibility.
+- Create FastAPI project structure and `core.config` JSON loader (§13), with the documented `--config` / default search-path resolution.
+- Configure SQLAlchemy, Alembic, and the initial schema migration covering every table in §7.
+- Define Pydantic request/response schemas mirroring §7 (omitting secrets per §12).
+- Implement repositories (`db.repositories`) for all tables, including the single-row constraint on `mqtt_brokers` (§7.1) and the foreign-key behavior in §7.8.
+- Implement admin CRUD endpoints for brokers, devices, segments, slots, LED states, and command presets (§9 CRUD entries), including the validation rules in §7.3 / §7.4 and the standardized error envelope (§8.4).
+- Repository unit tests against an in-memory SQLite, route tests with FastAPI's TestClient.
 
-### Milestone 3: Actor Runtime
+End state: backend starts with `--config <path>`, applies migrations, serves admin CRUD, returns redacted broker rows.
 
-- Implement actor registry.
-- Implement per-device actor state machine.
-- Implement registration, init slots, update slot state, reset, keepalive, ACK, error, and timeout handling.
-- Expose actor-owned runtime state (status, MAC, firmware, last keepalive, current task ID) through the device status endpoint without persisting it.
+### Phase 2: MQTT Protocol and Actor Runtime
 
-### Milestone 4: Public API
+Goal: the runtime works end-to-end against a simulated Firefly device. No HTTP command surface yet — drive it from tests.
 
-- Implement `updateFireflySlots` endpoint.
-- Implement update all slots and status endpoints.
-- Add OpenAPI examples.
+- Implement the topic builder (§6.2) and Pydantic payload models with JSON-name aliases (§6.3), including the directional segment semantics (§6.3, §7.3) and the pattern enum (§6.4).
+- Implement the MQTT client wrapper (`firefly.mqtt`) with QoS 0 publish/subscribe (§6.6), no LWT, no retained messages, and the global `cmd/ptm/register-req/+` subscription (§5.1).
+- Implement the actor registry and per-device actor (`firefly.actors`) using Pykka, with the state machine and status enum from §5.3.
+- Implement the boot sequence, including the no-slots-configured branch (§5.3, §9.2 note).
+- Implement ACK / error / timeout / retry handling per §5.4, including per-attempt `timeoutMs` semantics.
+- Implement the keepalive watchdog using `threading.Timer` and the `watchdog_fired` mailbox message (§5.4).
+- Implement registration preemption (§5.3) and the "Hard reset" action (§5.3, no ACK, no correlation).
+- Write every MQTT publish and every received message to `firefly_events` per the multi-row schema in §7.7. Implement the daily retention background job (§7.7).
+- Actor unit tests covering: registration, startup `init-slots`, slot-update ACK / error / timeout / retry, registration preemption while waiting for ACK, `NO_TASK_ID_WHEN_UPDATING_CELLS` / `TASK_ID_MISMATCH_UPDATING_CELLS` recovery, watchdog firing, keepalive-in-offline triggering fresh `init-slots`, hard reset clearing session state.
 
-### Milestone 5: Frontend
+End state: a test can simulate a Firefly device over MQTT and observe the actor running the full lifecycle correctly. No public/admin HTTP surface for commands yet.
 
-- Build React app shell.
-- Add `logo-firefly.png` as a frontend static asset and use it in the main application shell.
-- Add devices dashboard.
-- Add device detail and status view.
-- Add segment/slot editors.
-- Add LED states and command presets UI.
-- Add manual test panel and event log.
+### Phase 3: Public and Admin HTTP Surface
 
-### Milestone 6: Integration Testing and Packaging
+Goal: full backend feature-complete, exercised against a real MQTT broker.
 
-- Add simulated Firefly device tests.
-- Add local MQTT broker test setup.
-- Add production configuration documentation.
-- Serve built frontend from FastAPI.
-- Provide run, migration, and deployment instructions.
+- Implement the service layer (`firefly.service`) that translates HTTP requests into actor messages with synchronous ACK-waiting semantics (§8).
+- Public endpoints: `updateFireflySlots` (§8.1), `update-all-slots` (§8.2), status (§8.3).
+- Admin action endpoints: `:test-connection` (§9.1), `:start-actor` (§9.2), `:stop-actor` (§9.3), `:reinitialize` (§9.4), `slots:test` (§9.5), `:reset` (§9.6).
+- Apply the standardized error envelope (§8.4) consistently across both public and admin error paths.
+- Add the startup sequence from §11 (load config → migrations → load single broker → connect → start actors per configured device → serve routes), including the broker-not-configured path and the documented restart requirement.
+- Add OpenAPI examples for every endpoint.
+- Integration tests against a containerized MQTT broker (for example `eclipse-mosquitto`) with a simulated device, covering: status transitions through registration / keepalive / ACK / error / timeout, public API → MQTT message correctness, `:reset` flow.
+
+End state: backend is feature-complete and can be exercised by curl / HTTP clients.
+
+### Phase 4: Frontend
+
+Goal: full React UI bound to the generated OpenAPI client.
+
+- React app shell with routing.
+- Generate the TypeScript API client from FastAPI's OpenAPI schema.
+- Copy `logo-firefly.png` into the React assets (§10) and place it in the application shell.
+- Dashboard: broker status, device counts by status, recent errors/timeouts.
+- Devices list with status, firmware, MAC, last keepalive, action buttons.
+- Device detail view with live status, actor state, current task ID, **Reset** button (`:reset`, §9.6), reinitialize control.
+- Segment editor and slot editor with the reset-required banner after save (§10).
+- LED states editor with the reset-required banner.
+- Command presets editor.
+- Manual test panel using the admin `slots:test` endpoint.
+- Event log view backed by `firefly_events`.
+- Component tests for the editors and manual test panel; end-to-end smoke test against a mocked backend (create device → define segments/slots → issue manual update).
+
+End state: usable web UI for configuration, status monitoring, and manual testing.
+
+### Phase 5: Packaging and Documentation
+
+Goal: deployable build with operator-facing instructions.
+
+- Serve the built React app as static files from FastAPI (§4 module layout, `frontend.staticFilesPath` config).
+- Production configuration example (`config/firefly-appsettings.json`).
+- Run, migration, and deployment instructions (README).
+- Document the operator workflows that depend on backend restart (broker creation/change, §11) and on device reset (LED state / segment changes, §6.5).
+
+End state: a runnable artifact with documentation; ready for a first deployment.
