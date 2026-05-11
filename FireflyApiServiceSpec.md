@@ -246,8 +246,8 @@ Example registration response:
 		{
 			"channel": 1,
 			"ch-segm": 1,
-			"first-led-inx": 0,
-			"last-led-inx": 149
+			"first-led-inx": 1,
+			"last-led-inx": 150
 		}
 	],
 	"states": [
@@ -263,6 +263,13 @@ Example registration response:
 	]
 }
 ```
+
+Segment LED indexes in registration responses are 1-based and directional. The fields `first-led-inx` and `last-led-inx` define both the inclusive LED range and the physical growth direction of the segment relative to the controller:
+
+- If `first-led-inx` is lower than `last-led-inx`, the segment grows from the controller toward the end of the LED strip.
+- If `first-led-inx` is higher than `last-led-inx`, the segment grows from the end of the LED strip back toward the controller.
+
+Regardless of physical growth direction, configured Firefly slot indexes must increment in logical LED order from the smaller LED index to the higher LED index. For a reversed segment where `first-led-inx > last-led-inx`, slot ordering must still be calculated from the smaller LED index toward the higher LED index, even though that is opposite the segment's physical growth direction.
 
 Example init slots payload:
 
@@ -374,7 +381,7 @@ Version 1 can support one active broker, but the schema may allow multiple broke
 - `created_at`
 - `updated_at`
 
-This maps directly to the Firefly segment configuration returned during registration.
+This maps directly to the Firefly segment configuration returned during registration. `first_led_index` and `last_led_index` are 1-based inclusive LED indexes. Their relative order indicates segment direction, but slot ordering must always increment from the smaller LED index toward the higher LED index.
 
 ### 7.4 `firefly_slots`
 
@@ -390,7 +397,7 @@ This maps directly to the Firefly segment configuration returned during registra
 - `created_at`
 - `updated_at`
 
-Slot ordering must be deterministic. This service should store `slot_index` explicitly, validate uniqueness per device, and send the configured 1-based `slot_index` to Firefly as `slot-inx`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
+Slot ordering must be deterministic. This service should store `slot_index` explicitly, validate uniqueness per device, and send the configured 1-based `slot_index` to Firefly as `slot-inx`. For each segment, `slot_index` ordering must follow logical LED order from the smaller LED index to the higher LED index, even when the segment's `first_led_index` is greater than `last_led_index`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
 
 ### 7.5 `firefly_led_states`
 
@@ -728,6 +735,7 @@ Backend tests:
 
 - Unit tests for MQTT topic builders.
 - Unit tests for Pydantic payload serialization aliases.
+- Unit tests for segment direction and 1-based LED index handling when deriving Firefly slot order.
 - Unit tests for state, pattern, pattern value, and preset translation to Firefly MQTT payloads.
 - Actor tests for registration, startup init slots, slot update ACK, slot update error, timeout, registration preemption while waiting for ACK, and task ID mismatch recovery.
 - Repository tests against SQLite.
