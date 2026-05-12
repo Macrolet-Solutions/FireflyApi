@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -21,7 +22,21 @@ from firefly_api.core.config import AppConfig
 
 
 def _backend_root() -> Path:
-    # backend/firefly_api/core/startup.py -> backend/
+    """Resolve the directory that contains ``alembic.ini`` and ``alembic/``.
+
+    Two layouts:
+
+    - **Source checkout**: ``backend/firefly_api/core/startup.py`` →
+      ``backend/`` after three ``parent`` calls.
+    - **PyInstaller bundle**: when the app is frozen, the ``alembic.ini``
+      and ``alembic/`` directory are emitted into ``sys._MEIPASS``
+      (PyInstaller's runtime extraction root) by the spec's ``datas``
+      list, so the bundle root is the right answer.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
     return Path(__file__).resolve().parent.parent.parent
 
 

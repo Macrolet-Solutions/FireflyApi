@@ -15,20 +15,42 @@ spec:
 | 2 | MQTT protocol & actor runtime | ✅ |
 | 3 | Public + admin HTTP command surface | ✅ |
 | 4 | React frontend | ✅ |
-| 5 | Packaging & deployment docs | pending |
+| 5 | Packaging & deployment docs | ✅ |
 
 ## Layout
 
 ```
 .
 ├── backend/                # Python / FastAPI service
-├── frontend/               # React app (Phase 4)
+├── frontend/               # React + TypeScript + Mantine UI
+├── services/               # Service entry points (Windows: pywin32)
+├── packaging/              # Build + deploy artefacts (per OS)
+│   ├── pyinstaller/        # Platform-agnostic .spec files
+│   └── windows/            # build.bat + deploy.bat
 ├── config/
 │   └── firefly-appsettings.example.json
+├── DEPLOYMENT.md           # Production deployment guide
 ├── FireflyApiServiceSpec.md
 ├── logo-firefly.png
 └── README.md
 ```
+
+## Deploy to production (Windows service)
+
+See [`DEPLOYMENT.md`](DEPLOYMENT.md). Short version:
+
+```powershell
+packaging\windows\build.bat
+# copy dist\FireflyApi\ to the target machine
+.\deploy.bat install
+.\deploy.bat start
+```
+
+Other deployment targets (Linux/systemd, Docker) can be added as sibling
+folders under [`packaging/`](packaging/) without touching the
+application code — pywin32 only appears in
+[`services/firefly_api_service.py`](services/firefly_api_service.py) and
+[`backend/requirements-windows.txt`](backend/requirements-windows.txt).
 
 ## Quick start (development)
 

@@ -107,18 +107,14 @@ enabled. They cover:
 
 ## What's deliberately not in this phase
 
-The following appear in the spec but are still out of scope:
-
-- Admin events listing (`/api/v1/admin/events`) — read access to
-  `firefly_events`.
-- The React frontend (Phase 4) and the FastAPI static-files serving
-  hook that goes with it.
-- Production packaging (Phase 5).
-
-Everything else — admin CRUD, MQTT actor runtime, public command API,
-admin action endpoints, the `firefly_events` log writer, and the daily
-retention job — is wired and tested.
+Nothing remains out of scope — every spec endpoint and behavior is
+implemented. Admin CRUD, MQTT actor runtime, public command API, admin
+action endpoints, the `firefly_events` log writer, the daily retention
+job, the events admin read endpoint, and the optional bundled-frontend
+mount are all wired and tested.
 
 The backend still starts cleanly with no MQTT broker configured (admin
 CRUD remains available). Once a broker is created through the admin API,
 restart the backend so the §11 runtime startup picks it up.
+
+For Windows service packaging see [`../DEPLOYMENT.md`](../DEPLOYMENT.md).

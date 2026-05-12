@@ -7,13 +7,20 @@ DB; the CLI entry point loads the JSON config and hands it in.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+import logging
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from firefly_api.api.admin import admin_router
 from firefly_api.api.public import public_router
 from firefly_api.core.config import AppConfig
 from firefly_api.core.errors import register_exception_handlers
 from firefly_api.db.session import create_engine_for_url, create_session_factory
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(config: AppConfig) -> FastAPI:
@@ -39,5 +46,62 @@ def create_app(config: AppConfig) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(admin_router)
     app.include_router(public_router)
+    _mount_frontend_if_present(app, config)
 
     return app
+
+
+def _mount_frontend_if_present(app: FastAPI, config: AppConfig) -> None:
+    """Mount the built React app at ``/`` when ``frontend.staticFilesPath`` exists.
+
+    Behavior:
+
+    - If the configured path does not exist (typical for the development
+      workflow where the frontend is served by the Vite dev server), this
+      is a silent no-op.
+    - Otherwise the bundle is mounted at ``/`` with ``html=True`` so the
+      SPA can deep-link. A small catch-all route returns ``index.html``
+      for unknown paths so client-side routes survive a page reload, while
+      ``/api/*`` continues to hit FastAPI.
+    """
+    static_root = Path(config.frontend.static_files_path)
+    if not static_root.is_dir():
+        return
+    index_file = static_root / "index.html"
+    if not index_file.is_file():
+        logger.warning(
+            "frontend.staticFilesPath %s exists but has no index.html; "
+            "not mounting.",
+            static_root,
+        )
+        return
+
+    # Per-file static mount avoids shadowing the API routers above. We
+    # only mount the /assets/ subdir (Vite bundles everything else there)
+    # plus a small allowlist for the logo + favicon.
+    assets_dir = static_root / "assets"
+    if assets_dir.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="frontend-assets",
+        )
+
+    @app.get("/logo-firefly.png", include_in_schema=False)
+    def _logo() -> FileResponse:  # noqa: ANN202
+        return FileResponse(static_root / "logo-firefly.png")
+
+    @app.get("/", include_in_schema=False)
+    def _index() -> FileResponse:  # noqa: ANN202
+        return FileResponse(index_file)
+
+    # Catch-all for client-side routes (/dashboard, /devices/..., etc.).
+    # Anything starting with api/ is left to the normal 404 handler so
+    # unknown API endpoints don't silently return the SPA shell.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def _spa_fallback(full_path: str) -> FileResponse:  # noqa: ANN202
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(index_file)
+
+    logger.info("Frontend bundle mounted at / from %s", static_root)

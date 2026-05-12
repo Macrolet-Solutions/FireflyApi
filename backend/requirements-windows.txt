@@ -1,0 +1,9 @@
+-r requirements.txt
+
+# Windows service host. pywin32 only installs on Windows; keep it in the
+# Windows-only requirements set so a Linux/macOS contributor can run the
+# regular ``pip install -r requirements.txt`` without errors.
+pywin32>=308
+
+# Packager. Same reasoning: only needed when producing a service bundle.
+pyinstaller>=6.10
