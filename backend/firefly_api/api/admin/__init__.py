@@ -9,6 +9,7 @@ from firefly_api.api.admin import (
     brokers,
     command_presets,
     devices,
+    events,
     led_states,
     segments,
     slots,
@@ -21,4 +22,5 @@ admin_router.include_router(segments.router)
 admin_router.include_router(slots.router)
 admin_router.include_router(led_states.router)
 admin_router.include_router(command_presets.router)
+admin_router.include_router(events.router)
 admin_router.include_router(actions.router)

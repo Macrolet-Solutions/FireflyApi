@@ -1,0 +1,55 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--mantine-color-body);
+}
+
+/* Subtle ambient glow on the brand mark — fits "firefly" without
+   feeling decorative. */
+.brand-glow {
+  filter: drop-shadow(0 0 6px rgba(255, 193, 7, 0.35));
+}
+
+/* Status dot used in the device cards. */
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-dot.online {
+  background: var(--mantine-color-teal-5);
+  box-shadow: 0 0 6px var(--mantine-color-teal-5);
+}
+.status-dot.offline {
+  background: var(--mantine-color-red-5);
+}
+.status-dot.unknown {
+  background: var(--mantine-color-gray-5);
+}
+.status-dot.register_error {
+  background: var(--mantine-color-orange-5);
+}
+
+/* Subtle hover lift on cards. */
+.hover-lift {
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* JSON viewer inside event-log expanded rows. */
+.json-block {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
