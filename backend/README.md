@@ -1,8 +1,10 @@
-# Firefly API — Backend (Phase 1)
+# Firefly API — Backend (Phases 1-3)
 
-Python backend for the Firefly API Service. Phase 1 delivers the foundation
-and admin CRUD over the configuration tables. MQTT and the actor runtime
-arrive in Phase 2; the public integration API in Phase 3.
+Python backend for the Firefly API Service. Phase 1 delivered the
+foundation and admin CRUD. Phase 2 added the MQTT protocol layer, actor
+runtime, and event log. Phase 3 wires the actor runtime to the HTTP
+surface so external integrators can drive devices through the public
+API.
 
 ## Layout
 
@@ -105,18 +107,18 @@ enabled. They cover:
 
 ## What's deliberately not in this phase
 
-The following appear in the spec but are out of scope for Phase 1 — they
-arrive in Phase 2 (MQTT + actor runtime) or Phase 3 (public/admin HTTP
-command surface):
+The following appear in the spec but are still out of scope:
 
-- All public endpoints (`/api/v1/public/*`).
-- Admin action endpoints: `:start-actor`, `:stop-actor`, `:reinitialize`,
-  `:reset`, `:test-connection`, `slots:test`.
-- Admin events listing (`/api/v1/admin/events`).
-- MQTT broker connection, the actor registry, and any device runtime
-  behavior.
-- The daily `firefly_events` retention cron job.
+- Admin events listing (`/api/v1/admin/events`) — read access to
+  `firefly_events`.
+- The React frontend (Phase 4) and the FastAPI static-files serving
+  hook that goes with it.
+- Production packaging (Phase 5).
 
-The Phase 1 backend starts cleanly with no MQTT broker configured —
-operators configure one through the admin API, then restart the backend
-(§11) to enable Phase 2 functionality once it lands.
+Everything else — admin CRUD, MQTT actor runtime, public command API,
+admin action endpoints, the `firefly_events` log writer, and the daily
+retention job — is wired and tested.
+
+The backend still starts cleanly with no MQTT broker configured (admin
+CRUD remains available). Once a broker is created through the admin API,
+restart the backend so the §11 runtime startup picks it up.

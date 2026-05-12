@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import threading
 import time
 from concurrent.futures import Future
 from typing import Any
@@ -28,42 +26,11 @@ from firefly_api.firefly.protocol import (
     SegmentOut,
     UpdateSlotStateSlot,
 )
+from tests.firefly_helpers import FakePublisher
 
 
 VERSION = "v01.04"
 DEVICE = "FF01"
-
-
-class FakePublisher:
-    """Captures all MQTT publishes for inspection in tests."""
-
-    def __init__(self) -> None:
-        self.published: list[tuple[str, bytes]] = []
-        self._lock = threading.Lock()
-
-    def publish(self, topic: str, payload: bytes) -> None:
-        with self._lock:
-            self.published.append((topic, payload))
-
-    def topics(self) -> list[str]:
-        with self._lock:
-            return [t for t, _ in self.published]
-
-    def last_payload(self, topic_suffix: str | None = None) -> dict[str, Any]:
-        with self._lock:
-            items = self.published
-            if topic_suffix is not None:
-                items = [(t, p) for t, p in items if t.endswith(topic_suffix)]
-            if not items:
-                raise AssertionError(
-                    f"No publish for suffix {topic_suffix!r}; "
-                    f"have topics: {[t for t, _ in self.published]}"
-                )
-            return json.loads(items[-1][1].decode("utf-8"))
-
-    def clear(self) -> None:
-        with self._lock:
-            self.published.clear()
 
 
 # ----------------------------------------------------------------- fixtures ----

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import time
 from typing import Any
 
@@ -19,7 +18,6 @@ from firefly_api.db.models import (
     MqttBroker,
 )
 from firefly_api.firefly.actors import ActorRegistry, ActorStatus, RuntimeSettings
-from firefly_api.firefly.mqtt import InboundHandler
 from firefly_api.firefly.protocol import (
     REGISTER_REQ_SUBSCRIPTION,
     ack_topic,
@@ -27,42 +25,10 @@ from firefly_api.firefly.protocol import (
     keepalive_topic,
 )
 from firefly_api.firefly.protocol.topics import register_request_topic
+from tests.firefly_helpers import FakeMqttClient
 
 
 VERSION = "v01.04"
-
-
-class FakeMqttClient:
-    def __init__(self) -> None:
-        self.subscriptions: list[str] = []
-        self.publishes: list[tuple[str, bytes]] = []
-        self._handler: InboundHandler | None = None
-        self._lock = threading.Lock()
-
-    def connect(self) -> None:
-        pass
-
-    def disconnect(self) -> None:
-        pass
-
-    def subscribe(self, topic: str) -> None:
-        with self._lock:
-            self.subscriptions.append(topic)
-
-    def publish(self, topic: str, payload: bytes) -> None:
-        with self._lock:
-            self.publishes.append((topic, payload))
-
-    def set_message_handler(self, handler: InboundHandler) -> None:
-        self._handler = handler
-
-    def inject(self, topic: str, payload: bytes) -> None:
-        assert self._handler is not None, "Handler not set yet."
-        self._handler(topic, payload)
-
-    def topics(self) -> list[str]:
-        with self._lock:
-            return [t for t, _ in self.publishes]
 
 
 # ----------------------------------------------------------------- fixtures ----
@@ -238,7 +204,7 @@ def test_ack_routed_by_device_name_in_topic(
         )
         # Find the init-slots event_id for FF01.
         init_event_ids: dict[str, str] = {}
-        for topic, raw in list(mqtt.publishes):
+        for topic, raw in list(mqtt.published):
             if topic.endswith("/init-slots"):
                 body = json.loads(raw)
                 for name in ("FF01", "FF02"):
@@ -272,7 +238,7 @@ def test_error_routed_by_device_name(
         )
         # Find FF01's init-slots event_id.
         ff01_event: str | None = None
-        for topic, raw in list(mqtt.publishes):
+        for topic, raw in list(mqtt.published):
             if topic.endswith("/init-slots") and "/FF01/" in topic:
                 ff01_event = json.loads(raw)["event-id"]
                 break

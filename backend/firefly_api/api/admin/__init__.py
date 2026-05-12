@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from firefly_api.api.admin import (
+    actions,
     brokers,
     command_presets,
     devices,
@@ -20,3 +21,4 @@ admin_router.include_router(segments.router)
 admin_router.include_router(slots.router)
 admin_router.include_router(led_states.router)
 admin_router.include_router(command_presets.router)
+admin_router.include_router(actions.router)

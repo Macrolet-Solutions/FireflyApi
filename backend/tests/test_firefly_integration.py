@@ -9,7 +9,6 @@ registration -> init-slots ACK lifecycle produces the expected
 from __future__ import annotations
 
 import json
-import threading
 import time
 from typing import Any
 
@@ -28,51 +27,23 @@ from firefly_api.db.models import (
 )
 from firefly_api.firefly.actors import ActorRegistry, ActorStatus, RuntimeSettings
 from firefly_api.firefly.events import DbEventLog, EventType
-from firefly_api.firefly.mqtt import InboundHandler
 from firefly_api.firefly.protocol import (
     ack_topic,
     keepalive_topic,
 )
 from firefly_api.firefly.protocol.topics import register_request_topic
+from tests.firefly_helpers import FakeMqttClient
 
 
 VERSION = "v01.04"
 
 
-class FakeMqttClient:
-    def __init__(self) -> None:
-        self.subscriptions: list[str] = []
-        self.publishes: list[tuple[str, bytes]] = []
-        self._handler: InboundHandler | None = None
-        self._lock = threading.Lock()
-
-    def connect(self) -> None:
-        pass
-
-    def disconnect(self) -> None:
-        pass
-
-    def subscribe(self, topic: str) -> None:
-        with self._lock:
-            self.subscriptions.append(topic)
-
-    def publish(self, topic: str, payload: bytes) -> None:
-        with self._lock:
-            self.publishes.append((topic, payload))
-
-    def set_message_handler(self, handler: InboundHandler) -> None:
-        self._handler = handler
-
-    def inject(self, topic: str, payload: bytes) -> None:
-        assert self._handler is not None
-        self._handler(topic, payload)
-
-    def last_for(self, device_name: str, suffix: str) -> dict[str, Any]:
-        marker = f"/{device_name}/"
-        for topic, raw in reversed(self.publishes):
-            if marker in topic and topic.endswith(suffix):
-                return json.loads(raw.decode("utf-8"))
-        raise AssertionError(f"no publish for {device_name} suffix {suffix!r}")
+def _last_for(mqtt: FakeMqttClient, device_name: str, suffix: str) -> dict[str, Any]:
+    marker = f"/{device_name}/"
+    for topic, raw in reversed(mqtt.published):
+        if marker in topic and topic.endswith(suffix):
+            return json.loads(raw.decode("utf-8"))
+    raise AssertionError(f"no publish for {device_name} suffix {suffix!r}")
 
 
 @pytest.fixture(autouse=True)
@@ -148,9 +119,9 @@ def test_full_registration_lifecycle_writes_expected_event_rows(
     try:
         # Boot publishes init-slots; ACK it.
         _wait_until(
-            lambda: any(t.endswith("/init-slots") for t in [t for t, _ in mqtt.publishes])
+            lambda: any(t.endswith("/init-slots") for t in mqtt.topics())
         )
-        init_event_id = mqtt.last_for("FF01", "/init-slots")["event-id"]
+        init_event_id = _last_for(mqtt, "FF01", "/init-slots")["event-id"]
 
         ack_payload = json.dumps({"event-id": init_event_id}).encode()
         mqtt.inject(ack_topic(VERSION, "FF01"), ack_payload)

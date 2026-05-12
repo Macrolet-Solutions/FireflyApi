@@ -1,6 +1,10 @@
-"""Placeholder for the public integration API.
+"""Aggregator router for ``/api/v1/public/*`` endpoints (§8)."""
 
-The public endpoints (``/api/v1/public/fireflies/*``) are implemented in
-Phase 3 once the actor runtime exists. This module exists so that future
-imports of ``firefly_api.api.public`` resolve cleanly.
-"""
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from firefly_api.api.public import fireflies
+
+public_router = APIRouter(prefix="/api/v1/public")
+public_router.include_router(fireflies.router)

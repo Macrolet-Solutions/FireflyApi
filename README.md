@@ -12,8 +12,8 @@ spec:
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Backend foundation + admin CRUD | ✅ |
-| 2 | MQTT protocol & actor runtime | pending |
-| 3 | Public + admin HTTP command surface | pending |
+| 2 | MQTT protocol & actor runtime | ✅ |
+| 3 | Public + admin HTTP command surface | ✅ |
 | 4 | React frontend | pending |
 | 5 | Packaging & deployment docs | pending |
 

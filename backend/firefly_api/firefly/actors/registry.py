@@ -86,6 +86,51 @@ class ActorRegistry:
     def device_names(self) -> list[str]:
         return list(self._actors.keys())
 
+    def is_broker_connected(self) -> bool:
+        return self._mqtt.is_connected()
+
+    @property
+    def settings(self) -> RuntimeSettings:
+        return self._settings
+
+    # Per-device lifecycle (admin actions §9.2 / §9.3) ----------------------
+
+    def start_actor_for_device(self, device_name: str) -> str:
+        """Start the actor for ``device_name`` if not already running.
+
+        Returns ``"started"`` or ``"already_running"``. The caller is
+        responsible for validating broker connectivity (raises if not).
+        """
+        if device_name in self._actors:
+            return "already_running"
+        with self._session_factory() as db:
+            led_states = db.scalars(
+                select(FireflyLedState).order_by(FireflyLedState.id)
+            ).all()
+            registration_states = tuple(_to_registration_states(led_states))
+            device = db.scalar(
+                select(FireflyDevice).where(FireflyDevice.name == device_name)
+            )
+            if device is None:
+                raise KeyError(device_name)
+            config = self._build_device_config(db, device, registration_states)
+        self._spawn_one(config)
+        return "started"
+
+    def stop_actor_for_device(self, device_name: str) -> str:
+        """Stop the actor for ``device_name`` if running.
+
+        Returns ``"stopped"`` or ``"already_stopped"``.
+        """
+        actor = self._actors.pop(device_name, None)
+        if actor is None:
+            return "already_stopped"
+        try:
+            actor.stop(block=True, timeout=2.0)
+        except Exception:  # noqa: BLE001
+            logger.exception("Error stopping actor for %s", device_name)
+        return "stopped"
+
     # Inbound message dispatch ----------------------------------------------
 
     def _on_inbound(self, topic: str, payload: bytes) -> None:

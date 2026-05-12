@@ -79,6 +79,9 @@ class PahoMqttClient:
     def publish(self, topic: str, payload: bytes) -> None:
         self._client.publish(topic, payload=payload, qos=QOS)
 
+    def is_connected(self) -> bool:
+        return self._connected.is_set()
+
     # paho v2 callbacks ------------------------------------------------------
 
     def _on_connect(

@@ -13,6 +13,7 @@ import sys
 import uvicorn
 
 from firefly_api.core.config import load_config
+from firefly_api.core.runtime import start_runtime, stop_runtime
 from firefly_api.core.startup import bootstrap
 from firefly_api.main import create_app
 
@@ -32,8 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     bootstrap(config)
     app = create_app(config)
+    start_runtime(app, config)
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    try:
+        uvicorn.run(app, host=args.host, port=args.port)
+    finally:
+        stop_runtime(app)
     return 0
 
 
