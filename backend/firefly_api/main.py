@@ -8,6 +8,7 @@ DB; the CLI entry point loads the JSON config and hands it in.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -51,6 +52,34 @@ def create_app(config: AppConfig) -> FastAPI:
     return app
 
 
+def _resolve_frontend_root(config: AppConfig) -> Path | None:
+    """Pick the directory that holds the built React bundle, if any.
+
+    Resolution order:
+
+    1. The configured ``frontend.staticFilesPath`` interpreted relative to
+       the process working directory (the dev / source-checkout case).
+    2. When the app is running inside a PyInstaller bundle, the same
+       relative path interpreted against ``sys._MEIPASS`` — that's where
+       the spec's ``datas`` list dropped the frontend bundle, and
+       PyInstaller 6 keeps it under ``<bundle>/_internal/`` rather than
+       next to the exe.
+
+    Returns the first candidate that is a directory and contains an
+    ``index.html``; otherwise ``None``.
+    """
+    raw = Path(config.frontend.static_files_path)
+    candidates: list[Path] = [raw]
+    if not raw.is_absolute() and getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / raw)
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
 def _mount_frontend_if_present(app: FastAPI, config: AppConfig) -> None:
     """Mount the built React app at ``/`` when ``frontend.staticFilesPath`` exists.
 
@@ -59,22 +88,16 @@ def _mount_frontend_if_present(app: FastAPI, config: AppConfig) -> None:
     - If the configured path does not exist (typical for the development
       workflow where the frontend is served by the Vite dev server), this
       is a silent no-op.
-    - Otherwise the bundle is mounted at ``/`` with ``html=True`` so the
-      SPA can deep-link. A small catch-all route returns ``index.html``
-      for unknown paths so client-side routes survive a page reload, while
-      ``/api/*`` continues to hit FastAPI.
+    - Otherwise the bundle is mounted at ``/``. A catch-all route returns
+      ``index.html`` for unknown paths so client-side routes survive a
+      page reload; ``/api/*`` continues to hit FastAPI normally.
+    - The PyInstaller frozen case is handled too: see
+      :func:`_resolve_frontend_root`.
     """
-    static_root = Path(config.frontend.static_files_path)
-    if not static_root.is_dir():
+    static_root = _resolve_frontend_root(config)
+    if static_root is None:
         return
     index_file = static_root / "index.html"
-    if not index_file.is_file():
-        logger.warning(
-            "frontend.staticFilesPath %s exists but has no index.html; "
-            "not mounting.",
-            static_root,
-        )
-        return
 
     # Per-file static mount avoids shadowing the API routers above. We
     # only mount the /assets/ subdir (Vite bundles everything else there)

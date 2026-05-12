@@ -116,3 +116,38 @@ def test_no_mount_when_path_missing(
     with _make_client(session_factory, None) as client:
         r = client.get("/")
     assert r.status_code == 404
+
+
+def test_frozen_bundle_resolves_against_meipass(
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``sys.frozen`` is set, a relative ``staticFilesPath`` should
+    resolve against ``sys._MEIPASS`` so the bundled frontend (which
+    PyInstaller 6 places under ``_internal/`` rather than next to the
+    exe) is found even though it is not at the cwd."""
+    # Use a relative path that DOES NOT exist in the test cwd, so the
+    # only resolution that can succeed is the _MEIPASS branch.
+    rel_path = "bundled-frontend-only-in-meipass/dist"
+    meipass = tmp_path / "meipass"
+    bundle_dist = meipass / rel_path
+    bundle_dist.mkdir(parents=True)
+    (bundle_dist / "index.html").write_text("<html>frozen</html>", encoding="utf-8")
+
+    monkeypatch.setattr("firefly_api.main.sys.frozen", True, raising=False)
+    monkeypatch.setattr(
+        "firefly_api.main.sys._MEIPASS", str(meipass), raising=False
+    )
+
+    cfg = AppConfig(
+        database=DatabaseConfig(url="sqlite:///:memory:"),
+        firefly=FireflyConfig(firefly_interface_version="v01.04"),
+        frontend=FrontendConfig(static_files_path=rel_path),
+    )
+    app = create_app(cfg)
+    app.state.session_factory = session_factory
+    with TestClient(app) as client:
+        r = client.get("/")
+    assert r.status_code == 200
+    assert "frozen" in r.text
