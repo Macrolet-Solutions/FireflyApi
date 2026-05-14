@@ -303,7 +303,7 @@ Segment LED indexes in registration responses are 1-based and directional. The f
 - If `first-led-inx` is lower than `last-led-inx`, the segment grows from the controller toward the end of the LED strip.
 - If `first-led-inx` is higher than `last-led-inx`, the segment grows from the end of the LED strip back toward the controller.
 
-Regardless of physical growth direction, configured Firefly slot indexes must increment in logical LED order from the smaller LED index to the higher LED index. For a reversed segment where `first-led-inx > last-led-inx`, slot ordering must still be calculated from the smaller LED index toward the higher LED index, even though that is opposite the segment's physical growth direction.
+Regardless of physical growth direction, configured Firefly slot positions are relative slot-order values within the segment. Slots are adjacent; the service does not derive `pos-in-segm` from a starting LED index.
 
 Example init slots payload:
 
@@ -457,7 +457,7 @@ Validation rules:
 - `slot_index`: internal 1-based index sent to the Firefly device. Server-assigned, not supplied by clients.
 - `external_slot_id`: required business/integrator slot identifier used by the public API.
 - `label`
-- `segment_position`: required 1-based position within the segment, expressed in logical LED order (from the smaller LED index toward the higher LED index).
+- `segment_position`: required 1-based relative slot position within the segment. It is the slot order value sent to Firefly as `pos-in-segm`, not a starting LED index.
 - `num_leds`: required, must be `>= 1`.
 - `created_at`
 - `updated_at`
@@ -465,12 +465,12 @@ Validation rules:
 Validation rules:
 
 - `external_slot_id` must match the regex `^[A-Za-z0-9_-]{1,64}$` and be unique per device.
-- `slot_index` is unique per device and assigned **append-only** by the server on create: the server picks the next free 1-based integer in the device. There is no requirement that `slot_index` values within a segment reflect logical LED order; logical LED order is determined entirely by `segment_position`. Clients must not send `slot_index` on POST or PUT.
+- `slot_index` is unique per device and assigned **append-only** by the server on create: the server picks the next free 1-based integer in the device. There is no requirement that `slot_index` values within a segment reflect slot order; slot order within a segment is determined by `segment_position`. Clients must not send `slot_index` on POST or PUT.
 - A slot belongs to exactly one segment and may not span segments. `segment_id` is immutable on PUT; to move a slot to a different segment, delete it and recreate it.
 - `segment_position` is immutable on PUT. To change a slot's position within its segment, delete it and recreate it.
-- The slot's LED range within its segment is `[segment_position, segment_position + num_leds - 1]`. The range must fit inside the segment, i.e. `segment_position + num_leds - 1 <= segment_led_count`, where `segment_led_count = abs(last_led_index - first_led_index) + 1`.
-- Slots in the same segment may not overlap in their LED ranges.
-- Mutable PUT fields: `external_slot_id`, `label`, `num_leds`. Changes to `num_leds` must re-check the overlap rule above.
+- `segment_position` must be unique within a segment.
+- Slots in the same segment are adjacent. The sum of `num_leds` for all slots in the segment must fit inside the segment, i.e. `sum(num_leds) <= segment_led_count`, where `segment_led_count = abs(last_led_index - first_led_index) + 1`.
+- Mutable PUT fields: `external_slot_id`, `label`, `num_leds`. Changes to `num_leds` must re-check the segment capacity rule above.
 
 The configured `slot_index` is sent to Firefly as `slot-inx`. Public integration APIs must not expose `slot_index`; they must accept `externalSlotId` and resolve it to `slot_index` internally.
 

@@ -131,20 +131,18 @@ def update(
         last_led_index=data.last_led_index,
         exclude_segment_id=segment_id,
     )
-    # If the segment's LED range or channel changes, any existing slots
+    # If the segment's LED range or channel changes, the adjacent slot layout
     # within it must still fit. We enforce this explicitly.
     new_count = abs(data.last_led_index - data.first_led_index) + 1
-    for slot in segment.slots:
-        if slot.segment_position + slot.num_leds - 1 > new_count:
-            raise ValidationFailedError(
-                (
-                    f"Slot {slot.id} (segment_position={slot.segment_position}, "
-                    f"num_leds={slot.num_leds}) would no longer fit in the "
-                    f"resized segment ({new_count} LEDs)."
-                ),
-                error_code="slot_overflow_after_segment_resize",
-                details={"slot_id": slot.id},
-            )
+    total_slot_leds = sum(slot.num_leds for slot in segment.slots)
+    if total_slot_leds > new_count:
+        raise ValidationFailedError(
+            (
+                f"Configured slot LEDs ({total_slot_leds}) would no longer fit "
+                f"in the resized segment ({new_count} LEDs)."
+            ),
+            error_code="slot_overflow_after_segment_resize",
+        )
     for field, value in data.model_dump().items():
         setattr(segment, field, value)
     try:

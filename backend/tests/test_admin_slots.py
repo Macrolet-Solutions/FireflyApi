@@ -29,7 +29,7 @@ def test_create_assigns_slot_index_starting_at_one(
         json={
             "segment_id": segment["id"],
             "external_slot_id": "S2",
-            "segment_position": 11,
+            "segment_position": 2,
             "num_leds": 10,
         },
     )
@@ -46,7 +46,7 @@ def test_slot_index_is_append_only_after_inserting_earlier_position(
         json={
             "segment_id": segment["id"],
             "external_slot_id": "S2",
-            "segment_position": 50,
+            "segment_position": 2,
             "num_leds": 10,
         },
     )
@@ -65,7 +65,7 @@ def test_slot_index_is_append_only_after_inserting_earlier_position(
     assert r.json()["slot_index"] == 2
 
 
-def test_overlapping_slots_rejected(
+def test_duplicate_segment_position_rejected(
     client: TestClient, device: dict, segment: dict
 ) -> None:
     client.post(
@@ -82,24 +82,47 @@ def test_overlapping_slots_rejected(
         json={
             "segment_id": segment["id"],
             "external_slot_id": "S2",
-            "segment_position": 5,
+            "segment_position": 1,
             "num_leds": 10,
         },
     )
     assert r.status_code == 422
-    assert r.json()["errorCode"] == "slot_overlap"
+    assert r.json()["errorCode"] == "slot_position_conflict"
 
 
-def test_slot_out_of_segment_rejected(
+def test_segment_position_is_not_a_starting_led_index(
     client: TestClient, device: dict, segment: dict
 ) -> None:
-    # segment is 150 LEDs; pos 145 + num 10 -> last LED 154 > 150.
     r = client.post(
         _slot_url(device["id"]),
         json={
             "segment_id": segment["id"],
-            "external_slot_id": "OUT",
+            "external_slot_id": "S145",
             "segment_position": 145,
+            "num_leds": 10,
+        },
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_total_slot_leds_must_fit_in_segment(
+    client: TestClient, device: dict, segment: dict
+) -> None:
+    client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S1",
+            "segment_position": 1,
+            "num_leds": 145,
+        },
+    )
+    r = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S2",
+            "segment_position": 2,
             "num_leds": 10,
         },
     )
@@ -124,7 +147,7 @@ def test_duplicate_external_slot_id_returns_409(
         json={
             "segment_id": segment["id"],
             "external_slot_id": "S1",
-            "segment_position": 11,
+            "segment_position": 2,
             "num_leds": 10,
         },
     )
@@ -189,17 +212,17 @@ def test_update_num_leds_rechecks_overlap(
         json={
             "segment_id": segment["id"],
             "external_slot_id": "S2",
-            "segment_position": 11,
+            "segment_position": 2,
             "num_leds": 10,
         },
     )
-    # Growing s1 to 15 LEDs would overlap s2.
+    # Growing s1 beyond remaining segment capacity is rejected.
     r = client.put(
         f"{_slot_url(device['id'])}/{s1['id']}",
-        json={"external_slot_id": s1["external_slot_id"], "label": None, "num_leds": 15},
+        json={"external_slot_id": s1["external_slot_id"], "label": None, "num_leds": 145},
     )
     assert r.status_code == 422
-    assert r.json()["errorCode"] == "slot_overlap"
+    assert r.json()["errorCode"] == "slot_out_of_segment"
 
 
 def test_unknown_slot_returns_404(client: TestClient, device: dict) -> None:

@@ -328,7 +328,7 @@ function SlotCreateDialog({
           <NumberInput
             label="Segment position"
             min={1}
-            description="1-based, in logical LED order."
+            description="1-based relative slot order."
             {...form.getInputProps("segment_position")}
           />
           <NumberInput

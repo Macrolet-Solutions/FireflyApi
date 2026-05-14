@@ -7,10 +7,11 @@ Key business rules enforced here:
   this is also blocked at the API edge).
 - ``segment_id`` and ``segment_position`` are immutable on PUT.
 - Mutable PUT fields are ``external_slot_id``, ``label``, ``num_leds``. A
-  ``num_leds`` change re-checks the in-segment overlap rule.
-- The slot's LED range ``[segment_position, segment_position + num_leds - 1]``
-  must fit inside the segment, and must not overlap any sibling slot in the
-  same segment.
+    ``num_leds`` change re-checks the segment capacity rule.
+- ``segment_position`` is the slot's relative position within the segment, not
+    a starting LED index. Slots in a segment are physically adjacent, so the total
+    configured slot LED count must fit inside the segment and positions must be
+    unique within the segment.
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ def _segment_for_device(db: Session, device_id: int, segment_id: int) -> Firefly
     return segment
 
 
-def _check_fits_and_no_overlap(
+def _check_position_and_capacity(
     *,
     segment: FireflySegment,
     segment_position: int,
@@ -75,35 +76,35 @@ def _check_fits_and_no_overlap(
     siblings: list[FireflySlot],
     exclude_slot_id: int | None = None,
 ) -> None:
-    last = segment_position + num_leds - 1
-    if last > segment.led_count:
-        raise ValidationFailedError(
-            (
-                f"Slot range [{segment_position}, {last}] exceeds segment "
-                f"capacity of {segment.led_count} LEDs."
-            ),
-            error_code="slot_out_of_segment",
-        )
+    total_leds = num_leds
     for sibling in siblings:
         if exclude_slot_id is not None and sibling.id == exclude_slot_id:
             continue
-        s_first = sibling.segment_position
-        s_last = sibling.segment_position + sibling.num_leds - 1
-        if s_first <= last and segment_position <= s_last:
+        if sibling.segment_position == segment_position:
             raise ValidationFailedError(
                 (
-                    f"Slot range [{segment_position}, {last}] overlaps "
-                    f"slot {sibling.id} [{s_first}, {s_last}]."
+                    f"Slot position {segment_position} is already used by "
+                    f"slot {sibling.id}."
                 ),
-                error_code="slot_overlap",
+                error_code="slot_position_conflict",
                 details={"conflicting_slot_id": sibling.id},
             )
+        total_leds += sibling.num_leds
+
+    if total_leds > segment.led_count:
+        raise ValidationFailedError(
+            (
+                f"Total slot LEDs ({total_leds}) exceeds segment capacity "
+                f"of {segment.led_count} LEDs."
+            ),
+            error_code="slot_out_of_segment",
+        )
 
 
 def create(db: Session, device_id: int, data: FireflySlotCreate) -> FireflySlot:
     devices_repo.get_by_id(db, device_id)
     segment = _segment_for_device(db, device_id, data.segment_id)
-    _check_fits_and_no_overlap(
+    _check_position_and_capacity(
         segment=segment,
         segment_position=data.segment_position,
         num_leds=data.num_leds,
@@ -141,7 +142,7 @@ def update(
     slot = get_by_id(db, device_id, slot_id)
     segment = slot.segment  # immutable on PUT, so reuse
     if data.num_leds != slot.num_leds:
-        _check_fits_and_no_overlap(
+        _check_position_and_capacity(
             segment=segment,
             segment_position=slot.segment_position,
             num_leds=data.num_leds,
