@@ -173,16 +173,16 @@ class ActorRegistry:
             elif parsed.kind is InboundTopicKind.KEEPALIVE:
                 # Keepalive payload is optional; we don't need its contents.
                 actor.tell({"type": "keepalive"})
-        except ValidationError:
+        except ValidationError as exc:
             logger.warning(
-                "Malformed payload on topic %s; ignoring.", topic, exc_info=True
+                "Malformed payload on topic %s; ignoring: %s", topic, exc
             )
 
     def _dispatch_register_request(self, version: str, payload: bytes) -> None:
         try:
             request = RegistrationRequestIn.model_validate_json(payload)
-        except ValidationError:
-            logger.warning("Malformed register-req payload; ignoring.", exc_info=True)
+        except ValidationError as exc:
+            logger.warning("Malformed register-req payload; ignoring: %s", exc)
             return
         actor = self._actors.get(request.device_id)
         if actor is None:

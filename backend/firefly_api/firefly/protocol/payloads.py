@@ -8,7 +8,7 @@ an incoming payload.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Inbound payloads -----------------------------------------------------------
 
@@ -39,6 +39,13 @@ class ErrorIn(BaseModel):
     event_id: str = Field(alias="event-id")
     error_code: str = Field(alias="error-code")
     error_descr: str | None = Field(default=None, alias="error-descr")
+
+    @field_validator("error_code", mode="before")
+    @classmethod
+    def _coerce_error_code(cls, value: object) -> object:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        return value
 
 
 class KeepaliveIn(BaseModel):

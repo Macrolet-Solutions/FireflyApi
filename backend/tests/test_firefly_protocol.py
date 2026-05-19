@@ -137,6 +137,17 @@ def test_error_payload_round_trip() -> None:
     assert err.error_descr == "wrong task"
 
 
+def test_error_payload_accepts_numeric_error_code() -> None:
+    raw = {
+        "event-id": "abc",
+        "error-code": 1,
+        "error-descr": "numeric firmware code",
+    }
+    err = ErrorIn.model_validate(raw)
+    assert err.error_code == "1"
+    assert err.error_descr == "numeric firmware code"
+
+
 def test_keepalive_optional_fields_default_to_none() -> None:
     ka = KeepaliveIn.model_validate({})
     assert ka.free_memory is None

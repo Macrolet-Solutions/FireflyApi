@@ -74,7 +74,22 @@ def start_runtime(app: FastAPI, config: AppConfig) -> None:
 
     settings = _runtime_settings_from(config)
     mqtt_client = _build_mqtt_client(broker)
-    mqtt_client.connect()
+    try:
+        mqtt_client.connect()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "MQTT broker %s (%s:%s) is not reachable. Backend will serve admin "
+            "CRUD and frontend only; fix the broker configuration and restart to "
+            "enable the actor runtime.",
+            broker.name,
+            broker.host,
+            broker.port,
+        )
+        try:
+            mqtt_client.disconnect()
+        except Exception:  # noqa: BLE001
+            logger.exception("Error cleaning up failed MQTT client")
+        return
 
     event_log = DbEventLog(factory)
     registry = ActorRegistry(

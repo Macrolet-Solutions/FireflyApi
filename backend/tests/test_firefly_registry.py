@@ -247,7 +247,7 @@ def test_error_routed_by_device_name(
         err_payload = json.dumps(
             {
                 "event-id": ff01_event,
-                "error-code": "GENERIC_ERR",
+                "error-code": 1,
                 "error-descr": "x",
             }
         ).encode("utf-8")
