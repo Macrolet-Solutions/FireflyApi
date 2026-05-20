@@ -60,6 +60,7 @@ import win32service  # noqa: E402
 import win32serviceutil  # noqa: E402
 
 from firefly_api.core.config import AppConfig, load_config  # noqa: E402
+from firefly_api.core.log_config import configure_logging  # noqa: E402
 from firefly_api.core.runtime import start_runtime, stop_runtime  # noqa: E402
 from firefly_api.core.startup import bootstrap  # noqa: E402
 from firefly_api.main import create_app  # noqa: E402
@@ -112,6 +113,7 @@ class FireflyApiService(win32serviceutil.ServiceFramework):
 
     def _run_server(self) -> None:
         config = load_config()
+        configure_logging(config)
         bootstrap(config)
         self.app = create_app(config)
         start_runtime(self.app, config)
@@ -122,6 +124,7 @@ class FireflyApiService(win32serviceutil.ServiceFramework):
             host=host,
             port=port,
             log_level=config.logging.level.lower(),
+            access_log=True,
             log_config=None,
         )
         self.server = uvicorn.Server(uvi_config)
@@ -169,6 +172,7 @@ def _configure_service_metadata(service_name: str, display_name: str) -> None:
 def _run_console_mode() -> None:
     """Same lifecycle as the service, run in the current terminal."""
     config = load_config()
+    configure_logging(config)
     bootstrap(config)
     app = create_app(config)
     start_runtime(app, config)
@@ -183,6 +187,8 @@ def _run_console_mode() -> None:
             host=host,
             port=port,
             log_level=config.logging.level.lower(),
+            access_log=True,
+            log_config=None,
         )
     )
     try:

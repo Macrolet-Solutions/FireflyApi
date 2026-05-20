@@ -107,9 +107,11 @@ All commands accept `--service-name <name>` (or `--name <name>`). The
 
 ### Logs
 
-Application logs are written via Python's standard logging (level set
-through `logging.level` in the config). Service start / stop / failure
-events also land in the Windows Application Event Log under the source
+Application logs are written via Python's standard logging to daily files
+under `logging.folder` (`./AppLogs` by default). Files are named
+`log_YYYYMMDD.txt`, and every HTTP request is logged with method, path,
+status, duration, and client address. Service start / stop / failure events
+also land in the Windows Application Event Log under the source
 `MacroletFireflyApi` — useful when the service won't start, since
 `firefly_api_service.exe install` writes its initial failures there.
 
@@ -125,6 +127,7 @@ config use relative paths that resolve there:
 | `server.port` = `8000` | listens on TCP port 8000 |
 | `database.url` = `sqlite:///./data/firefly.db` | `dist\FireflyApi\data\firefly.db` |
 | `frontend.staticFilesPath` = `./frontend/dist` | served from inside the bundle |
+| `logging.folder` = `./AppLogs` | daily log files under `dist\FireflyApi\AppLogs` |
 
 The SQLite parent directory is created automatically on first start.
 Migrations run automatically (the bundle includes the `alembic/`

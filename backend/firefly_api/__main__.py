@@ -13,6 +13,7 @@ import sys
 import uvicorn
 
 from firefly_api.core.config import load_config
+from firefly_api.core.log_config import configure_logging
 from firefly_api.core.runtime import start_runtime, stop_runtime
 from firefly_api.core.startup import bootstrap
 from firefly_api.main import create_app
@@ -41,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
+    configure_logging(config)
     bootstrap(config)
     app = create_app(config)
     start_runtime(app, config)
@@ -50,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
             app,
             host=args.host or config.server.host,
             port=args.port or config.server.port,
+            access_log=True,
+            log_config=None,
         )
     finally:
         stop_runtime(app)

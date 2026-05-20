@@ -54,7 +54,10 @@ class ServerConfig(BaseModel):
 
 
 class LoggingConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     level: str = "INFO"
+    folder: str = Field(default="./AppLogs", alias="folder")
 
 
 class AppConfig(BaseModel):

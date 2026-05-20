@@ -9,20 +9,24 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from firefly_api.api.firefly_upd import router as firefly_upd_router
 from firefly_api.api.admin import admin_router
 from firefly_api.api.public import public_router
 from firefly_api.core.config import AppConfig
 from firefly_api.core.errors import register_exception_handlers
+from firefly_api.core.log_config import append_daily_log_line
 from firefly_api.db.session import create_engine_for_url, create_session_factory
 
 logger = logging.getLogger(__name__)
+access_logger = logging.getLogger("firefly_api.access")
 
 
 def create_app(config: AppConfig) -> FastAPI:
@@ -45,6 +49,7 @@ def create_app(config: AppConfig) -> FastAPI:
     app.state.mqtt_client = None
     app.state.retention_job = None
 
+    app.add_middleware(AccessLogMiddleware, log_folder=config.logging.folder)
     register_exception_handlers(app)
     app.include_router(firefly_upd_router)
     app.include_router(admin_router)
@@ -52,6 +57,83 @@ def create_app(config: AppConfig) -> FastAPI:
     _mount_frontend_if_present(app, config)
 
     return app
+
+
+class AccessLogMiddleware:
+    def __init__(self, app: ASGIApp, log_folder: str) -> None:
+        self.app = app
+        self.log_folder = log_folder
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = time.perf_counter()
+        status_code = 500
+        client = scope.get("client")
+        client_host = client[0] if client else "unknown"
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = int(message["status"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception:
+            duration_ms = (time.perf_counter() - started) * 1000
+            access_logger.exception(
+                "%s %s -> 500 %.2fms client=%s",
+                scope["method"],
+                scope["path"],
+                duration_ms,
+                client_host,
+            )
+            self._write_access_line(
+                "ERROR",
+                scope,
+                500,
+                duration_ms,
+                client_host,
+            )
+            raise
+
+        duration_ms = (time.perf_counter() - started) * 1000
+        access_logger.info(
+            "%s %s -> %d %.2fms client=%s",
+            scope["method"],
+            scope["path"],
+            status_code,
+            duration_ms,
+            client_host,
+        )
+        self._write_access_line(
+            "INFO",
+            scope,
+            status_code,
+            duration_ms,
+            client_host,
+        )
+
+    def _write_access_line(
+        self,
+        level: str,
+        scope: Scope,
+        status_code: int,
+        duration_ms: float,
+        client_host: str,
+    ) -> None:
+        append_daily_log_line(
+            self.log_folder,
+            "firefly_api.access",
+            level,
+            (
+                f"{scope['method']} {scope['path']} -> {status_code} "
+                f"{duration_ms:.2f}ms client={client_host}"
+            ),
+        )
 
 
 def _resolve_frontend_root(config: AppConfig) -> Path | None:
