@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from firefly_api.api.firefly_upd import router as firefly_upd_router
 from firefly_api.api.admin import admin_router
 from firefly_api.api.public import public_router
 from firefly_api.core.config import AppConfig
@@ -45,6 +46,7 @@ def create_app(config: AppConfig) -> FastAPI:
     app.state.retention_job = None
 
     register_exception_handlers(app)
+    app.include_router(firefly_upd_router)
     app.include_router(admin_router)
     app.include_router(public_router)
     _mount_frontend_if_present(app, config)

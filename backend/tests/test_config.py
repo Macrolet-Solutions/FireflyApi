@@ -30,6 +30,7 @@ def test_load_config_from_explicit_path(tmp_path: Path) -> None:
             "frontend": {"staticFilesPath": "./frontend/dist"},
             "server": {"host": "127.0.0.1", "port": 8080},
             "logging": {"level": "DEBUG"},
+            "fireflyUpdFilePath": "./data/firefly_upd/macrolet.cart.bin",
         },
     )
     cfg = load_config(cfg_path)
@@ -45,6 +46,7 @@ def test_load_config_from_explicit_path(tmp_path: Path) -> None:
     assert cfg.server.host == "127.0.0.1"
     assert cfg.server.port == 8080
     assert cfg.logging.level == "DEBUG"
+    assert cfg.firefly_upd_file_path == "./data/firefly_upd/macrolet.cart.bin"
 
 
 def test_load_config_missing_explicit_path(tmp_path: Path) -> None:
@@ -70,3 +72,4 @@ def test_load_config_applies_firefly_defaults(tmp_path: Path) -> None:
     assert cfg.frontend.static_files_path == "./frontend/dist"
     assert cfg.server.host == "0.0.0.0"
     assert cfg.server.port == 8000
+    assert cfg.firefly_upd_file_path is None

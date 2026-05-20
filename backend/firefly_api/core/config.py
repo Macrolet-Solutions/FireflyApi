@@ -58,12 +58,15 @@ class LoggingConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     database: DatabaseConfig
     firefly: FireflyConfig
     events: EventsConfig = EventsConfig()
     frontend: FrontendConfig = FrontendConfig()
     server: ServerConfig = ServerConfig()
     logging: LoggingConfig = LoggingConfig()
+    firefly_upd_file_path: str | None = Field(default=None, alias="fireflyUpdFilePath")
 
 
 def _resolve_path(explicit: str | Path | None) -> Path:
