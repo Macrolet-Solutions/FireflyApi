@@ -20,6 +20,8 @@ htmlcov/
 
 # Runtime data
 data/
+AppLogs/
+**/AppLogs/
 *.db
 *.sqlite
 *.sqlite3
