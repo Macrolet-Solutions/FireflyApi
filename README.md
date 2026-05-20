@@ -79,7 +79,8 @@ npm run dev
 ```
 
 - Frontend dev: <http://localhost:5173/>
-- Backend OpenAPI: <http://127.0.0.1:8000/docs>
+- Backend OpenAPI: <http://127.0.0.1:8000/docs> by default; change
+	`server.host` / `server.port` in `config\firefly-appsettings.json` if needed.
 
 See [`backend/README.md`](backend/README.md) and
 [`frontend/README.md`](frontend/README.md) for the per-tier development

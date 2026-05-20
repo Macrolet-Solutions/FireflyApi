@@ -987,6 +987,10 @@ Example:
 	"frontend": {
 		"staticFilesPath": "./frontend/dist"
 	},
+	"server": {
+		"host": "0.0.0.0",
+		"port": 8000
+	},
 	"logging": {
 		"level": "INFO"
 	}
@@ -1003,6 +1007,8 @@ The path to this JSON file is resolved in this order of precedence:
 2. The default path `./config/firefly-appsettings.json` relative to the process working directory.
 
 If neither produces a readable file, startup aborts with a clear error. Environment variables are not used for normal operation.
+
+The backend HTTP bind address is configured through `server.host` and `server.port` in the same JSON file.
 
 ## 14. Testing Requirements
 

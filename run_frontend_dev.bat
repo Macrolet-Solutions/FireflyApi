@@ -4,14 +4,16 @@ setlocal
 set "REPO_ROOT=%~dp0"
 set "FRONTEND_DIR=%REPO_ROOT%frontend"
 set "FRONTEND_PORT=%FIREFLY_FRONTEND_PORT%"
+set "CONFIG_PATH=%REPO_ROOT%config\firefly-appsettings.json"
 
 if "%FRONTEND_PORT%"=="" set "FRONTEND_PORT=5173"
 
 if "%FIREFLY_BACKEND_URL%"=="" (
-    if "%FIREFLY_PORT%"=="" (
+    if exist "%CONFIG_PATH%" (
+        for /f "usebackq delims=" %%U in (`python -c "import json, pathlib; data=json.loads(pathlib.Path(r'%CONFIG_PATH%').read_text(encoding='utf-8')); server=data.get('server', {}); host=server.get('host', '0.0.0.0'); port=server.get('port', 8000); display='127.0.0.1' if host in ('0.0.0.0', '::') else host; print(f'http://{display}:{port}')"`) do set "FIREFLY_BACKEND_URL=%%U"
+    )
+    if "%FIREFLY_BACKEND_URL%"=="" (
         set "FIREFLY_BACKEND_URL=http://127.0.0.1:8000"
-    ) else (
-        set "FIREFLY_BACKEND_URL=http://127.0.0.1:%FIREFLY_PORT%"
     )
 )
 

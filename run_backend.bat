@@ -2,11 +2,6 @@
 setlocal
 
 set "REPO_ROOT=%~dp0"
-set "HOST=%FIREFLY_HOST%"
-set "PORT=%FIREFLY_PORT%"
-
-if "%HOST%"=="" set "HOST=127.0.0.1"
-if "%PORT%"=="" set "PORT=8000"
 
 pushd "%REPO_ROOT%" >nul || exit /b 1
 
@@ -56,15 +51,17 @@ if errorlevel 1 (
 
 set "PYTHONPATH=%REPO_ROOT%backend;%PYTHONPATH%"
 
+for /f "usebackq delims=" %%U in (`"%PYTHON_EXE%" -c "import json, pathlib, os; data=json.loads(pathlib.Path(os.environ['RUN_BACKEND_GENERATED_CONFIG']).read_text(encoding='utf-8')); server=data.get('server', {}); host=server.get('host', '0.0.0.0'); port=server.get('port', 8000); display='127.0.0.1' if host in ('0.0.0.0', '::') else host; print(f'http://{display}:{port}')"`) do set "BACKEND_URL=%%U"
+
 echo Running Firefly API backend from source
 echo   Source config: %CONFIG_ABS%
 echo   Runtime config: %GENERATED_CONFIG%
 echo   Working directory: %CONFIG_BASE%
-echo   URL: http://%HOST%:%PORT%
+echo   URL: %BACKEND_URL%
 echo.
 
 pushd "%CONFIG_BASE%" >nul || exit /b 1
-"%PYTHON_EXE%" -m firefly_api --config "%GENERATED_CONFIG%" --host "%HOST%" --port "%PORT%"
+"%PYTHON_EXE%" -m firefly_api --config "%GENERATED_CONFIG%"
 set "EXIT_CODE=%ERRORLEVEL%"
 popd >nul
 popd >nul

@@ -55,8 +55,8 @@ copy config\firefly-appsettings.example.json config\firefly-appsettings.json
 ```
 
 Edit the copy as needed. The defaults point the SQLite database at
-`./data/firefly.db` and assume the frontend bundle (later phases) at
-`./frontend/dist`.
+`./data/firefly.db`, bind the backend to `0.0.0.0:8000`, and assume the
+frontend bundle (later phases) at `./frontend/dist`.
 
 ## Run migrations
 
@@ -79,7 +79,7 @@ variables (§13).
 
 ```powershell
 # From the repository root
-python -m firefly_api --config config\firefly-appsettings.json --host 127.0.0.1 --port 8000
+python -m firefly_api --config config\firefly-appsettings.json
 ```
 
 OpenAPI interactive docs: `http://127.0.0.1:8000/docs`.

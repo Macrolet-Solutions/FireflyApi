@@ -37,6 +37,7 @@ npm install
 
 Start the backend (from the repo root) and the frontend dev server
 together. The dev server proxies `/api/*` to `http://127.0.0.1:8000`,
+matching the default `server.port` in `config/firefly-appsettings.json`,
 so no CORS configuration is needed.
 
 ```powershell

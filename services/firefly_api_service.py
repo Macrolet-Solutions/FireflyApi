@@ -20,9 +20,13 @@ bundled ``firefly_api_service.exe``::
     firefly_api_service.exe start
     ...
 
+The service name and display name can be overridden by placing
+``--service-name <name>`` and ``--service-display-name <name>`` before
+the pywin32 command. ``deploy.bat`` exposes those options for packaged
+installs.
+
 The wrapper relies on the in-process FastAPI app + uvicorn server. The
-host/port are baked here so the bundled service has a stable default
-even before the operator edits the config file; everything else lives in
+bind host/port and application settings live in
 ``config/firefly-appsettings.json``.
 """
 
@@ -30,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,20 +59,20 @@ import win32event  # noqa: E402
 import win32service  # noqa: E402
 import win32serviceutil  # noqa: E402
 
-from firefly_api.core.config import load_config  # noqa: E402
+from firefly_api.core.config import AppConfig, load_config  # noqa: E402
 from firefly_api.core.runtime import start_runtime, stop_runtime  # noqa: E402
 from firefly_api.core.startup import bootstrap  # noqa: E402
 from firefly_api.main import create_app  # noqa: E402
 
 logger = logging.getLogger("FireflyApiService")
 
-DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 8000
+DEFAULT_SERVICE_NAME = "MacroletFireflyApi"
+DEFAULT_SERVICE_DISPLAY_NAME = "Macrolet Firefly API"
 
 
 class FireflyApiService(win32serviceutil.ServiceFramework):
-    _svc_name_ = "MacroletFireflyApi"
-    _svc_display_name_ = "Macrolet Firefly API"
+    _svc_name_ = DEFAULT_SERVICE_NAME
+    _svc_display_name_ = DEFAULT_SERVICE_DISPLAY_NAME
     _svc_description_ = (
         "Middleware and configuration platform for Macrolet Firefly devices."
     )
@@ -111,7 +116,7 @@ class FireflyApiService(win32serviceutil.ServiceFramework):
         self.app = create_app(config)
         start_runtime(self.app, config)
 
-        host, port = _resolve_bind()
+        host, port = _resolve_bind(config)
         uvi_config = uvicorn.Config(
             self.app,
             host=host,
@@ -123,18 +128,42 @@ class FireflyApiService(win32serviceutil.ServiceFramework):
         self.server.run()
 
 
-def _resolve_bind() -> tuple[str, int]:
-    """Bind address for service mode.
+def _resolve_bind(config: AppConfig) -> tuple[str, int]:
+    """Bind address for service mode from application config."""
+    return config.server.host, config.server.port
 
-    Service mode does not parse CLI args, so we pick up overrides from
-    the FIREFLY_HOST / FIREFLY_PORT environment variables when set. The
-    spec discourages env vars for application config (§13), but these
-    are a deployment-time wiring concern, not config — they only steer
-    where uvicorn listens.
-    """
-    host = os.environ.get("FIREFLY_HOST", DEFAULT_HOST)
-    port = int(os.environ.get("FIREFLY_PORT", DEFAULT_PORT))
-    return host, port
+
+def _parse_service_metadata_args(argv: list[str]) -> tuple[str, str, list[str]]:
+    service_name = DEFAULT_SERVICE_NAME
+    display_name = DEFAULT_SERVICE_DISPLAY_NAME
+    remaining = [argv[0]]
+
+    index = 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--service-name":
+            index += 1
+            if index >= len(argv):
+                raise SystemExit("--service-name requires a value")
+            service_name = argv[index]
+        elif arg == "--service-display-name":
+            index += 1
+            if index >= len(argv):
+                raise SystemExit("--service-display-name requires a value")
+            display_name = argv[index]
+        else:
+            remaining.append(arg)
+        index += 1
+
+    return service_name, display_name, remaining
+
+
+def _configure_service_metadata(service_name: str, display_name: str) -> None:
+    FireflyApiService._svc_name_ = service_name
+    FireflyApiService._svc_display_name_ = display_name
+    FireflyApiService._exe_args_ = subprocess.list2cmdline(
+        ["--service-name", service_name]
+    )
 
 
 def _run_console_mode() -> None:
@@ -143,7 +172,7 @@ def _run_console_mode() -> None:
     bootstrap(config)
     app = create_app(config)
     start_runtime(app, config)
-    host, port = _resolve_bind()
+    host, port = _resolve_bind(config)
     print(
         f"Running Firefly API in console mode on http://{host}:{port} "
         "(Ctrl+C to stop) ..."
@@ -163,6 +192,10 @@ def _run_console_mode() -> None:
 
 
 def main() -> None:
+    service_name, display_name, remaining = _parse_service_metadata_args(sys.argv)
+    _configure_service_metadata(service_name, display_name)
+    sys.argv = remaining
+
     if len(sys.argv) == 1:
         try:
             servicemanager.Initialize()

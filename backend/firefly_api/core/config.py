@@ -48,6 +48,11 @@ class FrontendConfig(BaseModel):
     static_files_path: str = Field(default="./frontend/dist", alias="staticFilesPath")
 
 
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = Field(default=8000, ge=1, le=65535)
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -57,6 +62,7 @@ class AppConfig(BaseModel):
     firefly: FireflyConfig
     events: EventsConfig = EventsConfig()
     frontend: FrontendConfig = FrontendConfig()
+    server: ServerConfig = ServerConfig()
     logging: LoggingConfig = LoggingConfig()
 
 

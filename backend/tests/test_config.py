@@ -28,6 +28,7 @@ def test_load_config_from_explicit_path(tmp_path: Path) -> None:
             },
             "events": {"retentionDays": 7},
             "frontend": {"staticFilesPath": "./frontend/dist"},
+            "server": {"host": "127.0.0.1", "port": 8080},
             "logging": {"level": "DEBUG"},
         },
     )
@@ -41,6 +42,8 @@ def test_load_config_from_explicit_path(tmp_path: Path) -> None:
     assert cfg.firefly.keepalive_disconnect_after_seconds == 60
     assert cfg.events.retention_days == 7
     assert cfg.frontend.static_files_path == "./frontend/dist"
+    assert cfg.server.host == "127.0.0.1"
+    assert cfg.server.port == 8080
     assert cfg.logging.level == "DEBUG"
 
 
@@ -65,3 +68,5 @@ def test_load_config_applies_firefly_defaults(tmp_path: Path) -> None:
     assert cfg.firefly.keepalive_disconnect_after_seconds == 300
     assert cfg.events.retention_days == 30
     assert cfg.frontend.static_files_path == "./frontend/dist"
+    assert cfg.server.host == "0.0.0.0"
+    assert cfg.server.port == 8000

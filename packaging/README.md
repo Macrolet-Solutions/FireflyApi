@@ -15,10 +15,11 @@ packaging/
 
 ### Windows (`windows/`)
 
-Bundles the backend + frontend into a single Windows service called
-`MacroletFireflyApi`. Uses **pyinstaller** for bundling and **pywin32**
-for the Service Control Manager glue. See [`../DEPLOYMENT.md`](../DEPLOYMENT.md)
-for the operator workflow.
+Bundles the backend + frontend into a Windows service called
+`MacroletFireflyApi` by default. The service name/display name can be
+overridden through `deploy.bat` options. Uses **pyinstaller** for
+bundling and **pywin32** for the Service Control Manager glue. See
+[`../DEPLOYMENT.md`](../DEPLOYMENT.md) for the operator workflow.
 
 Service entry point: [`services/firefly_api_service.py`](../services/firefly_api_service.py).
 

@@ -26,8 +26,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Path to firefly-appsettings.json (default ./config/firefly-appsettings.json).",
     )
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="Override server.host from the JSON config.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Override server.port from the JSON config.",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
@@ -36,7 +46,11 @@ def main(argv: list[str] | None = None) -> int:
     start_runtime(app, config)
 
     try:
-        uvicorn.run(app, host=args.host, port=args.port)
+        uvicorn.run(
+            app,
+            host=args.host or config.server.host,
+            port=args.port or config.server.port,
+        )
     finally:
         stop_runtime(app)
     return 0

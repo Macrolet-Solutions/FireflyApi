@@ -21,10 +21,11 @@ touch Windows-specific APIs.
 | **pywin32** | Service Control Manager integration | `backend/requirements-windows.txt` |
 | **Node 18+** | Frontend build | (Vite, already required for dev) |
 
-The service is registered as `MacroletFireflyApi`. It runs a uvicorn
-server on `0.0.0.0:8000` by default. Bind address can be overridden
-through the `FIREFLY_HOST` / `FIREFLY_PORT` environment variables in
-the service registration if needed.
+The service is registered as `MacroletFireflyApi` by default, with the
+display name `Macrolet Firefly API`. Those names can be overridden with
+`deploy.bat` options during install and later control commands. It runs
+a uvicorn server on the `server.host` / `server.port` values from
+`config\firefly-appsettings.json` (`0.0.0.0:8000` by default).
 
 ### Build the bundle
 
@@ -65,14 +66,22 @@ dist\FireflyApi\
    typically under `C:\Macrolet\FireflyApi\`.
 2. Copy `config\firefly-appsettings.example.json` to
    `config\firefly-appsettings.json` and edit the values — at minimum
-   adjust `database.url` if you want the SQLite file outside the bundle
-   directory.
+   adjust `server.port` if the backend should listen somewhere other
+   than port 8000, and `database.url` if you want the SQLite file
+   outside the bundle directory.
 3. Open an **elevated** PowerShell or `cmd` in the install folder and
    register the service:
 
    ```powershell
    .\deploy.bat install
    .\deploy.bat start
+   ```
+
+   To customize the Windows service name and display name:
+
+   ```powershell
+   .\deploy.bat install --service-name FireflyApiProd --display-name "Firefly API Prod"
+   .\deploy.bat start --service-name FireflyApiProd
    ```
 
 4. Verify with `.\deploy.bat status` or by browsing to
@@ -91,7 +100,10 @@ dist\FireflyApi\
 | `deploy.bat start` | Starts the service. |
 | `deploy.bat stop` | Stops the service. |
 | `deploy.bat restart` | Stops + 3 s pause + starts. Use after broker config changes (§11). |
-| `deploy.bat status` | Prints `sc query MacroletFireflyApi`. |
+| `deploy.bat status` | Prints `sc query` for the selected service name. |
+
+All commands accept `--service-name <name>` (or `--name <name>`). The
+`install` command also accepts `--display-name <name>`.
 
 ### Logs
 
@@ -109,6 +121,8 @@ config use relative paths that resolve there:
 
 | Config field | Resolves to |
 |---|---|
+| `server.host` = `0.0.0.0` | listens on all network interfaces |
+| `server.port` = `8000` | listens on TCP port 8000 |
 | `database.url` = `sqlite:///./data/firefly.db` | `dist\FireflyApi\data\firefly.db` |
 | `frontend.staticFilesPath` = `./frontend/dist` | served from inside the bundle |
 
