@@ -12,6 +12,7 @@ from firefly_api.db.session import get_db
 from firefly_api.schemas.slots import (
     FireflySlotCreate,
     FireflySlotOut,
+    FireflySlotReplaceRequest,
     FireflySlotUpdate,
 )
 
@@ -33,6 +34,15 @@ def get_slot(device_id: int, slot_id: int, db: DbSession) -> object:
 @router.post("", response_model=FireflySlotOut, status_code=status.HTTP_201_CREATED)
 def create_slot(device_id: int, data: FireflySlotCreate, db: DbSession) -> object:
     return repo.create(db, device_id, data)
+
+
+@router.put(":replace", response_model=list[FireflySlotOut])
+def replace_slots(
+    device_id: int,
+    data: FireflySlotReplaceRequest,
+    db: DbSession,
+) -> list:
+    return repo.replace_for_device(db, device_id, data.slots)
 
 
 @router.put("/{slot_id}", response_model=FireflySlotOut)

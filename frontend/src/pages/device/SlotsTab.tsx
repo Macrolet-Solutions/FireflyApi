@@ -16,18 +16,35 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
-import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import {
+  IconDownload,
+  IconPencil,
+  IconPlus,
+  IconTrash,
+  IconUpload,
+} from "@tabler/icons-react";
+import { readSheet } from "read-excel-file/browser";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import writeXlsxFile, { type SheetData } from "write-excel-file/browser";
 import { isApiError } from "@/api/client";
 import {
   useCreateSlot,
   useDeleteSlot,
+  useReplaceSlots,
   useSegments,
   useSlots,
   useUpdateSlot,
 } from "@/api/hooks";
-import type { FireflySlot } from "@/api/types";
+import type {
+  FireflySegment,
+  FireflySlot,
+  FireflySlotImportRow,
+} from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import {
+  SortableTableHeader,
+  type SortDirection,
+} from "@/components/SortableTableHeader";
 
 interface Props {
   deviceId: number;
@@ -49,14 +66,148 @@ interface SlotEditForm {
   num_leds: number | "";
 }
 
+type SlotSortKey =
+  | "slot_index"
+  | "external_slot_id"
+  | "segment_id"
+  | "segment_position"
+  | "num_leds"
+  | "label";
+
+const SLOT_COLUMNS: { key: SlotSortKey; label: string }[] = [
+  { key: "slot_index", label: "slot_index" },
+  { key: "external_slot_id", label: "External slot id" },
+  { key: "segment_id", label: "Segment" },
+  { key: "segment_position", label: "Position" },
+  { key: "num_leds", label: "LEDs" },
+  { key: "label", label: "Label" },
+];
+
+const SLOT_WORKBOOK_HEADERS = [
+  "external_slot_id",
+  "label",
+  "channel_num",
+  "segment_num_in_channel",
+  "segment_position",
+  "num_leds",
+] as const;
+
+function compareSlotValues(
+  aValue: number | string | null,
+  bValue: number | string | null,
+) {
+  if (typeof aValue === "number" && typeof bValue === "number") {
+    return aValue - bValue;
+  }
+
+  return String(aValue ?? "").localeCompare(String(bValue ?? ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildSlotsWorkbookData(
+  slots: FireflySlot[],
+  segments: FireflySegment[],
+): SheetData {
+  const segmentById = new Map(segments.map((segment) => [segment.id, segment]));
+  const rows = [...slots]
+    .sort((a, b) => a.slot_index - b.slot_index)
+    .map((slot) => {
+      const segment = segmentById.get(slot.segment_id);
+      return [
+        slot.external_slot_id,
+        slot.label ?? "",
+        segment?.channel_num ?? "",
+        segment?.segment_num_in_channel ?? "",
+        slot.segment_position,
+        slot.num_leds,
+      ];
+    });
+
+  return [[...SLOT_WORKBOOK_HEADERS], ...rows];
+}
+
+function workbookCellText(value: unknown) {
+  return value == null ? "" : String(value).trim();
+}
+
+function parsePositiveInt(value: unknown, rowNumber: number, field: string) {
+  const text = workbookCellText(value);
+  if (!/^\d+$/.test(text) || Number(text) < 1) {
+    throw new Error(`Row ${rowNumber}: ${field} must be a positive integer.`);
+  }
+  return Number(text);
+}
+
+function parseSlotWorkbookRows(rows: unknown[][]): FireflySlotImportRow[] {
+  const nonEmptyRows = rows.filter((row) =>
+    row.some((item) => workbookCellText(item) !== ""),
+  );
+  if (nonEmptyRows.length === 0) throw new Error("Workbook is empty.");
+
+  const headers = nonEmptyRows[0].map((header, index) =>
+    (index === 0
+      ? workbookCellText(header).replace(/^\uFEFF/, "")
+      : workbookCellText(header)),
+  );
+  const expectedHeaders = [...SLOT_WORKBOOK_HEADERS];
+  if (headers.join(",") !== expectedHeaders.join(",")) {
+    throw new Error(`Workbook headers must be: ${expectedHeaders.join(",")}.`);
+  }
+
+  return nonEmptyRows.slice(1).map((row, index) => {
+    const rowNumber = index + 2;
+    if (row.length !== expectedHeaders.length) {
+      throw new Error(`Row ${rowNumber}: expected ${expectedHeaders.length} columns.`);
+    }
+
+    const externalSlotId = workbookCellText(row[0]);
+    if (!EXTERNAL_RE.test(externalSlotId)) {
+      throw new Error(`Row ${rowNumber}: external_slot_id is invalid.`);
+    }
+
+    const label = workbookCellText(row[1]);
+    return {
+      external_slot_id: externalSlotId,
+      label: label || null,
+      channel_num: parsePositiveInt(row[2], rowNumber, "channel_num"),
+      segment_num_in_channel: parsePositiveInt(
+        row[3],
+        rowNumber,
+        "segment_num_in_channel",
+      ),
+      segment_position: parsePositiveInt(row[4], rowNumber, "segment_position"),
+      num_leds: parsePositiveInt(row[5], rowNumber, "num_leds"),
+    };
+  });
+}
+
+function importErrorMessage(error: unknown) {
+  if (!isApiError(error)) return String(error);
+  const errors = error.details.errors;
+  if (!Array.isArray(errors) || errors.length === 0) return error.description;
+  const first = errors[0] as { row?: number; message?: string };
+  return first.row
+    ? `Row ${first.row}: ${first.message}`
+    : first.message ?? error.description;
+}
+
 export function SlotsTab({ deviceId }: Props) {
   const segmentsQ = useSegments(deviceId);
   const slotsQ = useSlots(deviceId);
   const create = useCreateSlot(deviceId);
   const update = useUpdateSlot(deviceId);
   const del = useDeleteSlot(deviceId);
+  const replace = useReplaceSlots(deviceId);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<FireflySlot | null>(null);
+  const [segmentFilter, setSegmentFilter] = useState<string | null>(null);
+  const [sort, setSort] = useState<{
+    key: SlotSortKey;
+    direction: SortDirection;
+  }>({ key: "slot_index", direction: "asc" });
 
   const segments = segmentsQ.data ?? [];
   const slots = slotsQ.data ?? [];
@@ -65,6 +216,83 @@ export function SlotsTab({ deviceId }: Props) {
     return seg
       ? `ch ${seg.channel_num} · seg ${seg.segment_num_in_channel}`
       : `#${id}`;
+  };
+  const segmentOptions = segments.map((seg) => ({
+    value: String(seg.id),
+    label: segmentLabel(seg.id),
+  }));
+  const visibleSlots = useMemo(() => {
+    const filtered = segmentFilter
+      ? slots.filter((slot) => slot.segment_id === Number(segmentFilter))
+      : slots;
+
+    return [...filtered].sort((a, b) => {
+      const aValue =
+        sort.key === "segment_id" ? segmentLabel(a.segment_id) : a[sort.key];
+      const bValue =
+        sort.key === "segment_id" ? segmentLabel(b.segment_id) : b[sort.key];
+      const result = compareSlotValues(aValue, bValue);
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [segmentFilter, segments, slots, sort]);
+
+  const setSortKey = (key: SlotSortKey) => {
+    setSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const handleExport = async () => {
+    try {
+      await writeXlsxFile(buildSlotsWorkbookData(slots, segments), {
+        sheet: "Slots",
+        columns: [
+          { width: 24 },
+          { width: 24 },
+          { width: 14 },
+          { width: 24 },
+          { width: 18 },
+          { width: 12 },
+        ],
+      }).toFile(`firefly-${deviceId}-slots.xlsx`);
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: "Could not export slots",
+        message: String(error),
+      });
+    }
+  };
+
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    try {
+      const parsedSlots = parseSlotWorkbookRows(await readSheet(file));
+      if (
+        !confirm(
+          `Replace all current slots with ${parsedSlots.length} slots from ${file.name}?`,
+        )
+      ) {
+        return;
+      }
+      const imported = await replace.mutateAsync({ slots: parsedSlots });
+      notifications.show({
+        color: "teal",
+        title: "Slots imported",
+        message: `${imported.length} slots loaded.`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: "Could not import slots",
+        message: importErrorMessage(error),
+      });
+    }
   };
 
   return (
@@ -77,13 +305,37 @@ export function SlotsTab({ deviceId }: Props) {
             <code>init-slots</code>.
           </Text>
         </div>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          onClick={() => setAdding(true)}
-          disabled={segments.length === 0}
-        >
-          Add slot
-        </Button>
+        <Group gap="xs">
+          <Button
+            variant="default"
+            leftSection={<IconDownload size={16} />}
+            onClick={() => void handleExport()}
+          >
+            Export XLSX
+          </Button>
+          <Button
+            variant="default"
+            leftSection={<IconUpload size={16} />}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={segments.length === 0 || replace.isPending}
+          >
+            Import XLSX
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            style={{ display: "none" }}
+            onChange={handleImport}
+          />
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={() => setAdding(true)}
+            disabled={segments.length === 0}
+          >
+            Add slot
+          </Button>
+        </Group>
       </Group>
 
       {segments.length === 0 && (
@@ -96,31 +348,48 @@ export function SlotsTab({ deviceId }: Props) {
 
       <ErrorAlert error={segmentsQ.error || slotsQ.error} />
 
+      <Group align="flex-end">
+        <Select
+          label="Segment"
+          placeholder="All segments"
+          data={segmentOptions}
+          value={segmentFilter}
+          onChange={setSegmentFilter}
+          clearable
+          disabled={segments.length === 0}
+        />
+      </Group>
+
       <Card withBorder padding={0} radius="md">
         <Table.ScrollContainer minWidth={700}>
           <Table verticalSpacing="sm">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>slot_index</Table.Th>
-                <Table.Th>External slot id</Table.Th>
-                <Table.Th>Segment</Table.Th>
-                <Table.Th>Position</Table.Th>
-                <Table.Th>LEDs</Table.Th>
-                <Table.Th>Label</Table.Th>
+                {SLOT_COLUMNS.map((column) => (
+                  <SortableTableHeader
+                    key={column.key}
+                    label={column.label}
+                    active={sort.key === column.key}
+                    direction={sort.direction}
+                    onSort={() => setSortKey(column.key)}
+                  />
+                ))}
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {slots.length === 0 && (
+              {visibleSlots.length === 0 && (
                 <Table.Tr>
                   <Table.Td colSpan={7}>
                     <Text c="dimmed" size="sm" ta="center" py="lg">
-                      No slots configured.
+                      {slots.length === 0
+                        ? "No slots configured."
+                        : "No slots match the current filters."}
                     </Text>
                   </Table.Td>
                 </Table.Tr>
               )}
-              {slots.map((slot) => (
+              {visibleSlots.map((slot) => (
                 <Table.Tr key={slot.id}>
                   <Table.Td>
                     <Badge variant="default">#{slot.slot_index}</Badge>
@@ -191,10 +460,7 @@ export function SlotsTab({ deviceId }: Props) {
       <SlotCreateDialog
         opened={adding}
         onClose={() => setAdding(false)}
-        segments={segments.map((s) => ({
-          value: String(s.id),
-          label: segmentLabel(s.id),
-        }))}
+        segments={segmentOptions}
         onSubmit={async (vals) => {
           try {
             await create.mutateAsync(vals);

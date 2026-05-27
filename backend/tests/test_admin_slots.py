@@ -37,7 +37,7 @@ def test_create_assigns_slot_index_starting_at_one(
     assert r2.json()["slot_index"] == 2
 
 
-def test_slot_index_is_append_only_after_inserting_earlier_position(
+def test_slot_index_uses_next_controller_index_after_inserting_earlier_position(
     client: TestClient, device: dict, segment: dict
 ) -> None:
     # Create S2 first at a higher segment_position.
@@ -50,8 +50,8 @@ def test_slot_index_is_append_only_after_inserting_earlier_position(
             "num_leds": 10,
         },
     )
-    # Then create S1 at an earlier segment_position. slot_index must still
-    # be append-only (2), not renumbered to 1.
+    # Then create S1 at an earlier segment_position. slot_index is still the
+    # next controller-wide index (2), not derived from segment_position.
     r = client.post(
         _slot_url(device["id"]),
         json={
@@ -63,6 +63,154 @@ def test_slot_index_is_append_only_after_inserting_earlier_position(
     )
     assert r.status_code == 201
     assert r.json()["slot_index"] == 2
+
+
+def test_delete_compacts_slot_indexes_across_controller_channels(
+    client: TestClient, device: dict, segment: dict
+) -> None:
+    r_segment2 = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 2,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 150,
+        },
+    )
+    assert r_segment2.status_code == 201, r_segment2.text
+    segment2 = r_segment2.json()
+
+    s1 = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S1",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    ).json()
+    s2 = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S2",
+            "segment_position": 2,
+            "num_leds": 10,
+        },
+    ).json()
+    s3 = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment2["id"],
+            "external_slot_id": "S3",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    ).json()
+
+    r_delete = client.delete(f"{_slot_url(device['id'])}/{s2['id']}")
+    assert r_delete.status_code == 204
+
+    r_list = client.get(_slot_url(device["id"]))
+    assert r_list.status_code == 200
+    slots = r_list.json()
+    assert [(slot["id"], slot["slot_index"]) for slot in slots] == [
+        (s1["id"], 1),
+        (s3["id"], 2),
+    ]
+
+
+def test_replace_slots_recalculates_slot_indexes_from_import_order(
+    client: TestClient, device: dict, segment: dict
+) -> None:
+    r_segment2 = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 2,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 150,
+        },
+    )
+    assert r_segment2.status_code == 201, r_segment2.text
+
+    client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "OLD",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    )
+
+    r_replace = client.put(
+        f"{_slot_url(device['id'])}:replace",
+        json={
+            "slots": [
+                {
+                    "external_slot_id": "S-CH2",
+                    "label": "Second channel",
+                    "channel_num": 2,
+                    "segment_num_in_channel": 1,
+                    "segment_position": 1,
+                    "num_leds": 12,
+                },
+                {
+                    "external_slot_id": "S-CH1",
+                    "label": "First channel",
+                    "channel_num": 1,
+                    "segment_num_in_channel": 1,
+                    "segment_position": 1,
+                    "num_leds": 10,
+                },
+            ]
+        },
+    )
+    assert r_replace.status_code == 200, r_replace.text
+    slots = r_replace.json()
+    assert [(slot["external_slot_id"], slot["slot_index"]) for slot in slots] == [
+        ("S-CH2", 1),
+        ("S-CH1", 2),
+    ]
+
+
+def test_replace_slots_is_all_or_nothing_for_missing_segment(
+    client: TestClient, device: dict, segment: dict
+) -> None:
+    original = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "KEEP",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    ).json()
+
+    r_replace = client.put(
+        f"{_slot_url(device['id'])}:replace",
+        json={
+            "slots": [
+                {
+                    "external_slot_id": "BAD",
+                    "label": None,
+                    "channel_num": 99,
+                    "segment_num_in_channel": 1,
+                    "segment_position": 1,
+                    "num_leds": 10,
+                }
+            ]
+        },
+    )
+    assert r_replace.status_code == 422
+    assert r_replace.json()["errorCode"] == "slot_import_invalid"
+
+    r_list = client.get(_slot_url(device["id"]))
+    assert r_list.status_code == 200
+    assert [(slot["id"], slot["external_slot_id"]) for slot in r_list.json()] == [
+        (original["id"], "KEEP"),
+    ]
 
 
 def test_duplicate_segment_position_rejected(

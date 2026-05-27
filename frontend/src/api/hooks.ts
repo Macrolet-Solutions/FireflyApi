@@ -19,6 +19,7 @@ import type {
   FireflySegmentInput,
   FireflySlot,
   FireflySlotCreate,
+  FireflySlotReplaceRequest,
   FireflySlotUpdate,
   MqttBroker,
   MqttBrokerCreate,
@@ -285,6 +286,15 @@ export function useDeleteSlot(deviceId: number) {
   return useMutation({
     mutationFn: (slotId: number) =>
       api.del<void>(`${ADMIN}/fireflies/${deviceId}/slots/${slotId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["slots", deviceId] }),
+  });
+}
+
+export function useReplaceSlots(deviceId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: FireflySlotReplaceRequest) =>
+      api.put<FireflySlot[]>(`${ADMIN}/fireflies/${deviceId}/slots:replace`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["slots", deviceId] }),
   });
 }

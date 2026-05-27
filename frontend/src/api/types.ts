@@ -78,6 +78,19 @@ export interface FireflySlotCreate {
   num_leds: number;
 }
 
+export interface FireflySlotImportRow {
+  external_slot_id: string;
+  label?: string | null;
+  channel_num: number;
+  segment_num_in_channel: number;
+  segment_position: number;
+  num_leds: number;
+}
+
+export interface FireflySlotReplaceRequest {
+  slots: FireflySlotImportRow[];
+}
+
 export interface FireflySlotUpdate {
   external_slot_id: string;
   label?: string | null;

@@ -2,9 +2,10 @@
 
 Key business rules enforced here:
 
-- ``slot_index`` is **server-assigned**, append-only per device. Clients must
-  not send it (the schema does not include the field on Create/Update, so
-  this is also blocked at the API edge).
+- ``slot_index`` is **server-assigned** per device. Clients must not send it
+    (the schema does not include the field on Create/Update, so this is also
+    blocked at the API edge). It is compacted after deletes so firmware always
+    receives a gap-free 1-based sequence across the whole controller/device.
 - ``segment_id`` and ``segment_position`` are immutable on PUT.
 - Mutable PUT fields are ``external_slot_id``, ``label``, ``num_leds``. A
     ``num_leds`` change re-checks the segment capacity rule.
@@ -16,6 +17,8 @@ Key business rules enforced here:
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,7 +26,11 @@ from sqlalchemy.orm import Session
 from firefly_api.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from firefly_api.db.models import FireflySegment, FireflySlot
 from firefly_api.db.repositories import devices as devices_repo
-from firefly_api.schemas.slots import FireflySlotCreate, FireflySlotUpdate
+from firefly_api.schemas.slots import (
+    FireflySlotCreate,
+    FireflySlotImportRow,
+    FireflySlotUpdate,
+)
 
 
 def list_for_device(db: Session, device_id: int) -> list[FireflySlot]:
@@ -48,7 +55,7 @@ def get_by_id(db: Session, device_id: int, slot_id: int) -> FireflySlot:
 
 
 def _next_slot_index(db: Session, device_id: int) -> int:
-    """Return the next free 1-based ``slot_index`` for the device (append-only)."""
+    """Return the next 1-based ``slot_index`` for the device."""
     current_max = db.scalar(
         select(FireflySlot.slot_index)
         .where(FireflySlot.device_id == device_id)
@@ -56,6 +63,26 @@ def _next_slot_index(db: Session, device_id: int) -> int:
         .limit(1)
     )
     return (current_max or 0) + 1
+
+
+def _compact_slot_indexes(db: Session, device_id: int) -> None:
+    slots = list(
+        db.scalars(
+            select(FireflySlot)
+            .where(FireflySlot.device_id == device_id)
+            .order_by(FireflySlot.slot_index, FireflySlot.id)
+        )
+    )
+    if not slots:
+        return
+
+    temp_index = max(slot.slot_index for slot in slots) + len(slots) + 1
+    for offset, slot in enumerate(slots):
+        slot.slot_index = temp_index + offset
+    db.flush()
+
+    for index, slot in enumerate(slots, start=1):
+        slot.slot_index = index
 
 
 def _segment_for_device(db: Session, device_id: int, segment_id: int) -> FireflySegment:
@@ -133,6 +160,130 @@ def create(db: Session, device_id: int, data: FireflySlotCreate) -> FireflySlot:
     return slot
 
 
+def replace_for_device(
+    db: Session,
+    device_id: int,
+    rows: list[FireflySlotImportRow],
+) -> list[FireflySlot]:
+    devices_repo.get_by_id(db, device_id)
+    segments = list(
+        db.scalars(
+            select(FireflySegment).where(FireflySegment.device_id == device_id)
+        )
+    )
+    segment_by_key = {
+        (segment.channel_num, segment.segment_num_in_channel): segment
+        for segment in segments
+    }
+    import_errors: list[dict[str, object]] = []
+    external_slot_rows: dict[str, int] = {}
+    segment_position_rows: dict[tuple[int, int], int] = {}
+    led_totals: defaultdict[int, int] = defaultdict(int)
+    segment_by_row: list[FireflySegment | None] = []
+
+    for index, row in enumerate(rows, start=1):
+        external_seen_at = external_slot_rows.get(row.external_slot_id)
+        if external_seen_at is not None:
+            import_errors.append(
+                {
+                    "row": index,
+                    "field": "external_slot_id",
+                    "message": (
+                        f"Duplicate external_slot_id also used on row "
+                        f"{external_seen_at}."
+                    ),
+                }
+            )
+        else:
+            external_slot_rows[row.external_slot_id] = index
+
+        segment = segment_by_key.get((row.channel_num, row.segment_num_in_channel))
+        segment_by_row.append(segment)
+        if segment is None:
+            import_errors.append(
+                {
+                    "row": index,
+                    "field": "channel_num,segment_num_in_channel",
+                    "message": (
+                        f"Segment ch {row.channel_num} / seg "
+                        f"{row.segment_num_in_channel} does not exist."
+                    ),
+                }
+            )
+            continue
+
+        position_key = (segment.id, row.segment_position)
+        position_seen_at = segment_position_rows.get(position_key)
+        if position_seen_at is not None:
+            import_errors.append(
+                {
+                    "row": index,
+                    "field": "segment_position",
+                    "message": (
+                        f"Duplicate position for this segment also used on row "
+                        f"{position_seen_at}."
+                    ),
+                }
+            )
+        else:
+            segment_position_rows[position_key] = index
+        led_totals[segment.id] += row.num_leds
+
+    segment_by_id = {segment.id: segment for segment in segments}
+    for segment_id, total_leds in led_totals.items():
+        segment = segment_by_id[segment_id]
+        if total_leds > segment.led_count:
+            import_errors.append(
+                {
+                    "field": "num_leds",
+                    "message": (
+                        f"Total slot LEDs ({total_leds}) for ch "
+                        f"{segment.channel_num} / seg "
+                        f"{segment.segment_num_in_channel} exceeds segment "
+                        f"capacity of {segment.led_count} LEDs."
+                    ),
+                }
+            )
+
+    if import_errors:
+        raise ValidationFailedError(
+            "Slot CSV import failed validation.",
+            error_code="slot_import_invalid",
+            details={"errors": import_errors},
+        )
+
+    existing_slots = list(
+        db.scalars(select(FireflySlot).where(FireflySlot.device_id == device_id))
+    )
+    for slot in existing_slots:
+        db.delete(slot)
+    db.flush()
+
+    new_slots = [
+        FireflySlot(
+            device_id=device_id,
+            segment_id=segment_by_row[index].id,
+            slot_index=index + 1,
+            external_slot_id=row.external_slot_id,
+            label=row.label,
+            segment_position=row.segment_position,
+            num_leds=row.num_leds,
+        )
+        for index, row in enumerate(rows)
+        if segment_by_row[index] is not None
+    ]
+    db.add_all(new_slots)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(
+            "Imported slot configuration violates a database constraint.",
+            error_code="slot_import_conflict",
+        ) from exc
+    return list_for_device(db, device_id)
+
+
 def update(
     db: Session,
     device_id: int,
@@ -168,4 +319,6 @@ def update(
 def delete(db: Session, device_id: int, slot_id: int) -> None:
     slot = get_by_id(db, device_id, slot_id)
     db.delete(slot)
+    db.flush()
+    _compact_slot_indexes(db, device_id)
     db.commit()

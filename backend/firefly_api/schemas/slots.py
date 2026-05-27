@@ -37,6 +37,23 @@ class FireflySlotUpdate(BaseModel):
     num_leds: int = Field(ge=1)
 
 
+class FireflySlotImportRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+    external_slot_id: str = Field(pattern=EXTERNAL_SLOT_ID_PATTERN)
+    label: str | None = Field(default=None, max_length=255)
+    channel_num: int = Field(ge=1)
+    segment_num_in_channel: int = Field(ge=1)
+    segment_position: int = Field(ge=1)
+    num_leds: int = Field(ge=1)
+
+
+class FireflySlotReplaceRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
+
+    slots: list[FireflySlotImportRow]
+
+
 class FireflySlotOut(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 

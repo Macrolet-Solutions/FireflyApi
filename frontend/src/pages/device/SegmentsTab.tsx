@@ -5,6 +5,7 @@ import {
   Group,
   Modal,
   NumberInput,
+  Select,
   Stack,
   Table,
   Text,
@@ -14,7 +15,7 @@ import {
 import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isApiError } from "@/api/client";
 import {
   useCreateSegment,
@@ -25,6 +26,10 @@ import {
 import type { FireflySegment } from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { ResetRequiredBanner } from "@/components/ResetRequiredBanner";
+import {
+  SortableTableHeader,
+  type SortDirection,
+} from "@/components/SortableTableHeader";
 
 interface Props {
   deviceId: number;
@@ -37,6 +42,23 @@ interface SegmentFormValues {
   last_led_index: number | "";
 }
 
+type SegmentSortKey =
+  | "id"
+  | "channel_num"
+  | "segment_num_in_channel"
+  | "first_led_index"
+  | "last_led_index"
+  | "led_count";
+
+const SEGMENT_COLUMNS: { key: SegmentSortKey; label: string }[] = [
+  { key: "id", label: "ID" },
+  { key: "channel_num", label: "Channel" },
+  { key: "segment_num_in_channel", label: "Segment in channel" },
+  { key: "first_led_index", label: "First LED" },
+  { key: "last_led_index", label: "Last LED" },
+  { key: "led_count", label: "LED count" },
+];
+
 function emptyValues(): SegmentFormValues {
   return {
     channel_num: 1,
@@ -46,6 +68,14 @@ function emptyValues(): SegmentFormValues {
   };
 }
 
+function segmentLedCount(seg: FireflySegment) {
+  return Math.abs(seg.last_led_index - seg.first_led_index) + 1;
+}
+
+function segmentSortValue(seg: FireflySegment, key: SegmentSortKey) {
+  return key === "led_count" ? segmentLedCount(seg) : seg[key];
+}
+
 export function SegmentsTab({ deviceId }: Props) {
   const q = useSegments(deviceId);
   const create = useCreateSegment(deviceId);
@@ -53,6 +83,54 @@ export function SegmentsTab({ deviceId }: Props) {
   const del = useDeleteSegment(deviceId);
   const [editing, setEditing] = useState<FireflySegment | null>(null);
   const [adding, setAdding] = useState(false);
+  const [channelFilter, setChannelFilter] = useState<string | null>(null);
+  const [segmentInChannelFilter, setSegmentInChannelFilter] = useState<
+    string | null
+  >(null);
+  const [sort, setSort] = useState<{
+    key: SegmentSortKey;
+    direction: SortDirection;
+  }>({ key: "id", direction: "asc" });
+
+  const segments = q.data ?? [];
+  const channelOptions = useMemo(
+    () =>
+      Array.from(new Set(segments.map((seg) => seg.channel_num)))
+        .sort((a, b) => a - b)
+        .map((value) => ({ value: String(value), label: String(value) })),
+    [segments],
+  );
+  const segmentInChannelOptions = useMemo(
+    () =>
+      Array.from(new Set(segments.map((seg) => seg.segment_num_in_channel)))
+        .sort((a, b) => a - b)
+        .map((value) => ({ value: String(value), label: String(value) })),
+    [segments],
+  );
+  const visibleSegments = useMemo(() => {
+    const filtered = segments.filter((seg) => {
+      const matchesChannel = channelFilter
+        ? seg.channel_num === Number(channelFilter)
+        : true;
+      const matchesSegmentInChannel = segmentInChannelFilter
+        ? seg.segment_num_in_channel === Number(segmentInChannelFilter)
+        : true;
+      return matchesChannel && matchesSegmentInChannel;
+    });
+
+    return [...filtered].sort((a, b) => {
+      const result = segmentSortValue(a, sort.key) - segmentSortValue(b, sort.key);
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [channelFilter, segmentInChannelFilter, segments, sort]);
+
+  const setSortKey = (key: SegmentSortKey) => {
+    setSort((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  };
 
   return (
     <Stack>
@@ -73,33 +151,56 @@ export function SegmentsTab({ deviceId }: Props) {
 
       <ErrorAlert error={q.error} />
 
+      <Group align="flex-end">
+        <Select
+          label="Channel"
+          placeholder="All channels"
+          data={channelOptions}
+          value={channelFilter}
+          onChange={setChannelFilter}
+          clearable
+        />
+        <Select
+          label="Segment in channel"
+          placeholder="All segments"
+          data={segmentInChannelOptions}
+          value={segmentInChannelFilter}
+          onChange={setSegmentInChannelFilter}
+          clearable
+        />
+      </Group>
+
       <Card withBorder padding={0} radius="md">
         <Table.ScrollContainer minWidth={600}>
           <Table verticalSpacing="sm">
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>Channel</Table.Th>
-                <Table.Th>Segment in channel</Table.Th>
-                <Table.Th>First LED</Table.Th>
-                <Table.Th>Last LED</Table.Th>
-                <Table.Th>LED count</Table.Th>
+                {SEGMENT_COLUMNS.map((column) => (
+                  <SortableTableHeader
+                    key={column.key}
+                    label={column.label}
+                    active={sort.key === column.key}
+                    direction={sort.direction}
+                    onSort={() => setSortKey(column.key)}
+                  />
+                ))}
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(q.data ?? []).length === 0 && (
+              {visibleSegments.length === 0 && (
                 <Table.Tr>
                   <Table.Td colSpan={7}>
                     <Text c="dimmed" size="sm" ta="center" py="lg">
-                      No segments configured.
+                      {segments.length === 0
+                        ? "No segments configured."
+                        : "No segments match the current filters."}
                     </Text>
                   </Table.Td>
                 </Table.Tr>
               )}
-              {(q.data ?? []).map((seg) => {
-                const ledCount =
-                  Math.abs(seg.last_led_index - seg.first_led_index) + 1;
+              {visibleSegments.map((seg) => {
+                const ledCount = segmentLedCount(seg);
                 return (
                   <Table.Tr key={seg.id}>
                     <Table.Td>

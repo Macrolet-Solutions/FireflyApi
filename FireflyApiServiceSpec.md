@@ -465,7 +465,7 @@ Validation rules:
 Validation rules:
 
 - `external_slot_id` must match the regex `^[A-Za-z0-9_-]{1,64}$` and be unique per device.
-- `slot_index` is unique per device and assigned **append-only** by the server on create: the server picks the next free 1-based integer in the device. There is no requirement that `slot_index` values within a segment reflect slot order; slot order within a segment is determined by `segment_position`. Clients must not send `slot_index` on POST or PUT.
+- `slot_index` is unique per device/controller and server-assigned. On create, the server picks the next 1-based integer in the device. On delete, the server recalculates `slot_index` values for all remaining slots in the device so the sequence is gap-free across all channels. There is no requirement that `slot_index` values within a segment reflect slot order; slot order within a segment is determined by `segment_position`. Clients must not send `slot_index` on POST or PUT.
 - A slot belongs to exactly one segment and may not span segments. `segment_id` is immutable on PUT; to move a slot to a different segment, delete it and recreate it.
 - `segment_position` is immutable on PUT. To change a slot's position within its segment, delete it and recreate it.
 - `segment_position` must be unique within a segment.
@@ -714,6 +714,7 @@ DELETE /api/v1/admin/fireflies/{deviceId}/segments/{segmentId}
 
 GET    /api/v1/admin/fireflies/{deviceId}/slots
 POST   /api/v1/admin/fireflies/{deviceId}/slots
+PUT    /api/v1/admin/fireflies/{deviceId}/slots:replace
 PUT    /api/v1/admin/fireflies/{deviceId}/slots/{slotId}
 DELETE /api/v1/admin/fireflies/{deviceId}/slots/{slotId}
 POST   /api/v1/admin/fireflies/{deviceId}/slots:test
@@ -914,7 +915,7 @@ Main views:
 - Devices: list of Firefly devices with status, firmware, MAC, last keepalive, and action buttons.
 - Device detail: live status, MQTT metadata, actor state, current task ID, **Reset** control (calls `:reset`, §9.6), reinitialize control.
 - Segment editor: configure channel, segment number, first LED index, last LED index. Saving changes shows a banner reminding the operator that the device must be reset (via the **Reset** button on the device detail page) for segment changes to take effect.
-- Slot editor: configure the required external slot identifier, segment, segment position, number of LEDs, and label. `slot_index` is server-assigned and is shown read-only.
+- Slot editor: configure the required external slot identifier, segment, segment position, number of LEDs, and label. `slot_index` is server-assigned and is shown read-only. Operators can export/import XLSX workbooks using `external_slot_id,label,channel_num,segment_num_in_channel,segment_position,num_leds`; imports replace the full slot configuration atomically and recalculate `slot_index` values from workbook row order.
 - LED states: manage reusable low-level Firefly states. Saving changes shows the same reset-required banner as the segment editor.
 - Command presets: map friendly preset names to LED state and pattern.
 - Manual test panel: select a device and slots, choose a configured state, pattern, optional pattern value, or preset, send update, and view ACK/error result.

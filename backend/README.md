@@ -100,7 +100,7 @@ enabled. They cover:
   - single-row broker constraint (§7.1)
   - segment overlap on the same channel (both forward and reverse
     direction, §6.3 / §7.3)
-  - append-only slot index assignment (§7.4)
+  - gap-free controller-wide slot index assignment after deletes (§7.4)
   - adjacent slot LED totals fit inside the segment and positions are unique
   - immutability of `segment_position` and `segment_id` on PUT
   - RESTRICT delete semantics for broker / segment / LED-state references
