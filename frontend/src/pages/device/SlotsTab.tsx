@@ -211,8 +211,12 @@ export function SlotsTab({ deviceId }: Props) {
 
   const segments = segmentsQ.data ?? [];
   const slots = slotsQ.data ?? [];
+  const segmentById = useMemo(
+    () => new Map(segments.map((segment) => [segment.id, segment])),
+    [segments],
+  );
   const segmentLabel = (id: number) => {
-    const seg = segments.find((s) => s.id === id);
+    const seg = segmentById.get(id);
     return seg
       ? `ch ${seg.channel_num} · seg ${seg.segment_num_in_channel}`
       : `#${id}`;
@@ -221,6 +225,12 @@ export function SlotsTab({ deviceId }: Props) {
     value: String(seg.id),
     label: segmentLabel(seg.id),
   }));
+  const staticSegmentOptions = segments
+    .filter((seg) => seg.mode === "static")
+    .map((seg) => ({
+      value: String(seg.id),
+      label: segmentLabel(seg.id),
+    }));
   const visibleSlots = useMemo(() => {
     const filtered = segmentFilter
       ? slots.filter((slot) => slot.segment_id === Number(segmentFilter))
@@ -317,7 +327,7 @@ export function SlotsTab({ deviceId }: Props) {
             variant="default"
             leftSection={<IconUpload size={16} />}
             onClick={() => fileInputRef.current?.click()}
-            disabled={segments.length === 0 || replace.isPending}
+            disabled={staticSegmentOptions.length === 0 || replace.isPending}
           >
             Import XLSX
           </Button>
@@ -331,7 +341,7 @@ export function SlotsTab({ deviceId }: Props) {
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => setAdding(true)}
-            disabled={segments.length === 0}
+            disabled={staticSegmentOptions.length === 0}
           >
             Add slot
           </Button>
@@ -342,6 +352,13 @@ export function SlotsTab({ deviceId }: Props) {
         <Card withBorder radius="md" mb="md">
           <Text size="sm" c="dimmed">
             Add at least one segment before configuring slots.
+          </Text>
+        </Card>
+      )}
+      {segments.length > 0 && staticSegmentOptions.length === 0 && (
+        <Card withBorder radius="md" mb="md">
+          <Text size="sm" c="dimmed">
+            All segments are dynamic. Load slots through the public API.
           </Text>
         </Card>
       )}
@@ -389,7 +406,9 @@ export function SlotsTab({ deviceId }: Props) {
                   </Table.Td>
                 </Table.Tr>
               )}
-              {visibleSlots.map((slot) => (
+              {visibleSlots.map((slot) => {
+                const isDynamic = segmentById.get(slot.segment_id)?.mode === "dynamic";
+                return (
                 <Table.Tr key={slot.id}>
                   <Table.Td>
                     <Badge variant="default">#{slot.slot_index}</Badge>
@@ -413,6 +432,7 @@ export function SlotsTab({ deviceId }: Props) {
                         <ActionIcon
                           variant="subtle"
                           onClick={() => setEditing(slot)}
+                          disabled={isDynamic}
                         >
                           <IconPencil size={16} />
                         </ActionIcon>
@@ -421,6 +441,7 @@ export function SlotsTab({ deviceId }: Props) {
                         <ActionIcon
                           color="red"
                           variant="subtle"
+                          disabled={isDynamic}
                           onClick={async () => {
                             if (
                               !confirm(
@@ -451,7 +472,8 @@ export function SlotsTab({ deviceId }: Props) {
                     </Group>
                   </Table.Td>
                 </Table.Tr>
-              ))}
+                );
+              })}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
@@ -460,7 +482,7 @@ export function SlotsTab({ deviceId }: Props) {
       <SlotCreateDialog
         opened={adding}
         onClose={() => setAdding(false)}
-        segments={segmentOptions}
+        segments={staticSegmentOptions}
         onSubmit={async (vals) => {
           try {
             await create.mutateAsync(vals);

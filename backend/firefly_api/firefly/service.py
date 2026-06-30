@@ -28,8 +28,10 @@ from firefly_api.core.errors import (
 from firefly_api.db.models import (
     FireflyDevice,
     FireflyLedState,
+    FireflySegment,
     FireflySlot,
 )
+from firefly_api.db.repositories import slots as slots_repo
 from firefly_api.firefly.actors import (
     ActorRegistry,
     ActorStatus,
@@ -39,6 +41,7 @@ from firefly_api.firefly.actors import (
     RuntimeSettings,
 )
 from firefly_api.firefly.protocol import (
+    InitSlotsSlot,
     UpdateSlotStateSlot,
     pattern_from_public_name,
 )
@@ -132,6 +135,38 @@ class FireflyService:
             "eventId": outcome.event_id,
             "currentTaskId": snapshot.get("current_task_id"),
             "clientRequestId": client_request_id,
+        }
+
+    def load_slots(
+        self,
+        *,
+        device_name: str,
+        segments_in: list[dict],
+    ) -> dict:
+        self._ensure_broker_connected()
+        actor, device = self._lookup_actor_by_name(device_name)
+        with self._session_factory() as db:
+            slots_repo.replace_dynamic_segments(db, device.id, segments_in)
+            init_slots = self._build_init_slots(db, device.id)
+
+        per_attempt_ms = self._settings.ack_timeout_ms
+        future: Future = Future()
+        actor.tell(
+            {
+                "type": "submit_load_slots",
+                "init_slots": init_slots,
+                "timeout_ms": per_attempt_ms,
+                "result_future": future,
+            }
+        )
+        outcome = self._await_outcome(future, per_attempt_ms)
+        snapshot = self._snapshot(actor)
+        return {
+            "deviceName": device_name,
+            "status": "loaded",
+            "eventId": outcome.event_id,
+            "currentTaskId": snapshot.get("current_task_id"),
+            "clientRequestId": None,
         }
 
     def get_device_status(self, *, device_name: str) -> dict:
@@ -314,6 +349,27 @@ class FireflyService:
         return [
             self._build_slot_struct(s, slot_map, valid_state_names) for s in slots_in
         ]
+
+    def _build_init_slots(self, db: Session, device_id: int) -> tuple[InitSlotsSlot, ...]:
+        segments = db.scalars(
+            select(FireflySegment).where(FireflySegment.device_id == device_id)
+        ).all()
+        segment_by_id = {segment.id: segment for segment in segments}
+        slots = db.scalars(
+            select(FireflySlot)
+            .where(FireflySlot.device_id == device_id)
+            .order_by(FireflySlot.slot_index)
+        ).all()
+        return tuple(
+            InitSlotsSlot(
+                slot_inx=slot.slot_index,
+                channel=segment_by_id[slot.segment_id].channel_num,
+                ch_segm=segment_by_id[slot.segment_id].segment_num_in_channel,
+                pos_in_segm=slot.segment_position,
+                num_leds=slot.num_leds,
+            )
+            for slot in slots
+        )
 
     def _build_update_slots_from_internal(
         self, device: FireflyDevice, slots_in: list[dict]

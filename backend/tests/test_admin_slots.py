@@ -238,6 +238,68 @@ def test_duplicate_segment_position_rejected(
     assert r.json()["errorCode"] == "slot_position_conflict"
 
 
+def test_create_slot_on_dynamic_segment_rejected(
+    client: TestClient, device: dict
+) -> None:
+    segment_resp = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 1,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 150,
+            "mode": "dynamic",
+        },
+    )
+    assert segment_resp.status_code == 201, segment_resp.text
+
+    r = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment_resp.json()["id"],
+            "external_slot_id": "S1",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["errorCode"] == "dynamic_segment_slots_not_allowed"
+
+
+def test_replace_slots_on_dynamic_segment_rejected(
+    client: TestClient, device: dict
+) -> None:
+    segment_resp = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 1,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 150,
+            "mode": "dynamic",
+        },
+    )
+    assert segment_resp.status_code == 201, segment_resp.text
+
+    r = client.put(
+        f"{_slot_url(device['id'])}:replace",
+        json={
+            "slots": [
+                {
+                    "external_slot_id": "S1",
+                    "label": None,
+                    "channel_num": 1,
+                    "segment_num_in_channel": 1,
+                    "segment_position": 1,
+                    "num_leds": 10,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["errorCode"] == "slot_import_invalid"
+
+
 def test_segment_position_is_not_a_starting_led_index(
     client: TestClient, device: dict, segment: dict
 ) -> None:

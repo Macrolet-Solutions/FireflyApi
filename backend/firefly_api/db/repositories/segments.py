@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from firefly_api.core.errors import ConflictError, NotFoundError, ValidationFailedError
-from firefly_api.db.models import FireflySegment, FireflySlot
+from firefly_api.db.models import SEGMENT_MODE_DYNAMIC, FireflySegment, FireflySlot
 from firefly_api.db.repositories import devices as devices_repo
 from firefly_api.schemas.segments import FireflySegmentCreate, FireflySegmentUpdate
 
@@ -135,6 +135,14 @@ def update(
     # within it must still fit. We enforce this explicitly.
     new_count = abs(data.last_led_index - data.first_led_index) + 1
     total_slot_leds = sum(slot.num_leds for slot in segment.slots)
+    if data.mode == SEGMENT_MODE_DYNAMIC and total_slot_leds > 0:
+        raise ConflictError(
+            (
+                f"Segment {segment_id} still has configured slots. Remove them "
+                "before switching the segment to dynamic mode."
+            ),
+            error_code="dynamic_segment_has_slots",
+        )
     if total_slot_leds > new_count:
         raise ValidationFailedError(
             (

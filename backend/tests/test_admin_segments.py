@@ -100,6 +100,49 @@ def test_delete_with_slot_returns_409(
     assert r.json()["errorCode"] == "segment_in_use"
 
 
+def test_switch_to_dynamic_requires_no_slots(
+    client: TestClient, device: dict, segment: dict
+) -> None:
+    slot_resp = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/slots",
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S1",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    )
+    assert slot_resp.status_code == 201, slot_resp.text
+
+    r = client.put(
+        f"{_seg_url(device['id'])}/{segment['id']}",
+        json={
+            "channel_num": segment["channel_num"],
+            "segment_num_in_channel": segment["segment_num_in_channel"],
+            "first_led_index": segment["first_led_index"],
+            "last_led_index": segment["last_led_index"],
+            "mode": "dynamic",
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["errorCode"] == "dynamic_segment_has_slots"
+
+
+def test_create_dynamic_segment(client: TestClient, device: dict) -> None:
+    r = client.post(
+        _seg_url(device["id"]),
+        json={
+            "channel_num": 1,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 150,
+            "mode": "dynamic",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["mode"] == "dynamic"
+
+
 def test_resize_uses_total_slot_leds_not_segment_position(
     client: TestClient, device: dict, segment: dict
 ) -> None:

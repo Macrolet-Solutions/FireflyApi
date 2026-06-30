@@ -10,6 +10,7 @@ from firefly_api.firefly.service import FireflyService
 from firefly_api.schemas.public import (
     CommandResponse,
     DeviceStatusResponse,
+    LoadSlotsRequest,
     UpdateAllSlotsRequest,
     UpdateFireflySlotsRequest,
 )
@@ -70,6 +71,31 @@ def update_all_slots(
         pattern_value=body.pattern_value,
         timeout_ms=body.timeout_ms,
         client_request_id=body.client_request_id,
+    )
+
+
+@router.post("/{device_name}/load-slots", response_model=CommandResponse)
+def load_slots(
+    device_name: str,
+    body: LoadSlotsRequest,
+    service: ServiceDep,
+) -> dict:
+    return service.load_slots(
+        device_name=device_name,
+        segments_in=[
+            {
+                "channel_num": segment.channel_num,
+                "segment_num_in_channel": segment.segment_num_in_channel,
+                "slots": [
+                    {
+                        "external_slot_id": slot.external_slot_id,
+                        "num_leds": slot.num_leds,
+                    }
+                    for slot in segment.slots
+                ],
+            }
+            for segment in body.segments
+        ],
     )
 
 

@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Badge,
   Button,
   Card,
   Group,
@@ -40,6 +41,7 @@ interface SegmentFormValues {
   segment_num_in_channel: number | "";
   first_led_index: number | "";
   last_led_index: number | "";
+  mode: "static" | "dynamic";
 }
 
 type SegmentSortKey =
@@ -65,6 +67,7 @@ function emptyValues(): SegmentFormValues {
     segment_num_in_channel: 1,
     first_led_index: 1,
     last_led_index: 150,
+    mode: "static",
   };
 }
 
@@ -184,13 +187,14 @@ export function SegmentsTab({ deviceId }: Props) {
                     onSort={() => setSortKey(column.key)}
                   />
                 ))}
+                <Table.Th>Mode</Table.Th>
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {visibleSegments.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={7}>
+                  <Table.Td colSpan={8}>
                     <Text c="dimmed" size="sm" ta="center" py="lg">
                       {segments.length === 0
                         ? "No segments configured."
@@ -213,6 +217,11 @@ export function SegmentsTab({ deviceId }: Props) {
                     <Table.Td>{seg.first_led_index}</Table.Td>
                     <Table.Td>{seg.last_led_index}</Table.Td>
                     <Table.Td>{ledCount}</Table.Td>
+                    <Table.Td>
+                      <Badge color={seg.mode === "dynamic" ? "blue" : "gray"}>
+                        {seg.mode}
+                      </Badge>
+                    </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
                       <Group gap="xs" justify="flex-end">
                         <Tooltip label="Edit">
@@ -309,6 +318,7 @@ interface DialogProps {
     segment_num_in_channel: number;
     first_led_index: number;
     last_led_index: number;
+    mode: "static" | "dynamic";
   }) => Promise<void>;
 }
 
@@ -334,6 +344,7 @@ function SegmentDialog({ opened, editing, onClose, onSubmit }: DialogProps) {
         segment_num_in_channel: editing.segment_num_in_channel,
         first_led_index: editing.first_led_index,
         last_led_index: editing.last_led_index,
+        mode: editing.mode,
       });
     } else {
       form.setValues(emptyValues());
@@ -355,6 +366,7 @@ function SegmentDialog({ opened, editing, onClose, onSubmit }: DialogProps) {
             segment_num_in_channel: Number(vals.segment_num_in_channel),
             first_led_index: Number(vals.first_led_index),
             last_led_index: Number(vals.last_led_index),
+            mode: vals.mode,
           });
         })}
       >
@@ -380,6 +392,15 @@ function SegmentDialog({ opened, editing, onClose, onSubmit }: DialogProps) {
             min={1}
             description="May be lower than first to express reverse growth direction (§6.3)."
             {...form.getInputProps("last_led_index")}
+          />
+          <Select
+            label="Mode"
+            data={[
+              { value: "static", label: "Static" },
+              { value: "dynamic", label: "Dynamic" },
+            ]}
+            allowDeselect={false}
+            {...form.getInputProps("mode")}
           />
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>

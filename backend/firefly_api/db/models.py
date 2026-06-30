@@ -30,6 +30,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
+SEGMENT_MODE_STATIC = "static"
+SEGMENT_MODE_DYNAMIC = "dynamic"
+
+
 def utc_now() -> datetime:
     """Return the current time as a timezone-aware UTC ``datetime``."""
     return datetime.now(timezone.utc)
@@ -99,6 +103,10 @@ class FireflySegment(Base, _Timestamped):
         ),
         CheckConstraint("first_led_index >= 1", name="ck_firefly_segments_first_led_ge_1"),
         CheckConstraint("last_led_index >= 1", name="ck_firefly_segments_last_led_ge_1"),
+        CheckConstraint(
+            "mode IN ('static', 'dynamic')",
+            name="ck_firefly_segments_mode",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -111,6 +119,9 @@ class FireflySegment(Base, _Timestamped):
     segment_num_in_channel: Mapped[int] = mapped_column(Integer, nullable=False)
     first_led_index: Mapped[int] = mapped_column(Integer, nullable=False)
     last_led_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=SEGMENT_MODE_STATIC
+    )
 
     device: Mapped[FireflyDevice] = relationship(back_populates="segments")
     slots: Mapped[list[FireflySlot]] = relationship(back_populates="segment")

@@ -1,0 +1,388 @@
+:root {
+  --firefly: #ffc107;
+  --firefly-strong: #ff8f00;
+  --ink: #17202a;
+  --muted: #65717f;
+  --line: #e7ebef;
+  --soft: #f7f9fb;
+  --panel: #ffffff;
+  --code-bg: #111827;
+  --code-text: #f8fafc;
+}
+
+@page {
+  size: A4;
+  margin: 22mm 16mm 20mm;
+}
+
+@page:first {
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  color: var(--ink);
+  background: #ffffff;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.55;
+}
+
+body {
+  counter-reset: section;
+}
+
+.cover-page {
+  position: relative;
+  min-height: 297mm;
+  padding: 28mm 24mm 22mm;
+  overflow: hidden;
+  page-break-after: always;
+  background:
+    radial-gradient(circle at 78% 28%, rgba(255, 193, 7, 0.22), transparent 31%),
+    linear-gradient(145deg, #ffffff 0%, #fbfcfe 54%, #fff6d8 100%);
+}
+
+.cover-page::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 11mm;
+  background: linear-gradient(180deg, var(--firefly) 0%, var(--firefly-strong) 100%);
+}
+
+.cover-page::after {
+  content: "";
+  position: absolute;
+  right: -56mm;
+  bottom: -62mm;
+  width: 165mm;
+  height: 165mm;
+  border: 1px solid rgba(255, 143, 0, 0.24);
+  border-radius: 50%;
+}
+
+.cover-header,
+.cover-main,
+.cover-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.cover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cover-logo {
+  width: 68mm;
+  height: auto;
+  filter: drop-shadow(0 8px 18px rgba(255, 193, 7, 0.22));
+}
+
+.cover-kicker,
+.cover-label,
+.section-eyebrow {
+  color: var(--firefly-strong);
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cover-main {
+  max-width: 150mm;
+  margin-top: 42mm;
+}
+
+.cover-main h1 {
+  margin: 8mm 0 7mm;
+  color: #111827;
+  font-size: 38pt;
+  font-weight: 750;
+  line-height: 1.03;
+  letter-spacing: 0;
+}
+
+.cover-subtitle {
+  max-width: 118mm;
+  margin: 0;
+  color: #46515f;
+  font-size: 14pt;
+  line-height: 1.45;
+}
+
+.cover-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4mm;
+  width: 150mm;
+  margin: 22mm 0 0;
+}
+
+.cover-meta div {
+  min-height: 26mm;
+  padding: 5mm;
+  border: 1px solid rgba(23, 32, 42, 0.1);
+  border-radius: 3mm;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 14px 34px rgba(17, 24, 39, 0.08);
+}
+
+.cover-meta dt {
+  margin-bottom: 2mm;
+  color: var(--muted);
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cover-meta dd {
+  margin: 0;
+  color: #111827;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  font-weight: 700;
+}
+
+.cover-footer {
+  position: absolute;
+  right: 24mm;
+  bottom: 18mm;
+  left: 24mm;
+  display: flex;
+  justify-content: space-between;
+  color: #5b6573;
+  font-size: 9pt;
+}
+
+.toc-page {
+  page-break-after: always;
+}
+
+.toc-page h2 {
+  margin-top: 1mm;
+  font-size: 24pt;
+}
+
+.toc {
+  margin: 10mm 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toc li {
+  display: flex;
+  gap: 4mm;
+  padding: 2.1mm 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.toc a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.toc .toc-level-3 {
+  padding-left: 8mm;
+  color: var(--muted);
+  font-size: 9.5pt;
+}
+
+.document-content {
+  page-break-before: always;
+}
+
+.document-content > h1:first-child {
+  display: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: #111827;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+  break-after: avoid;
+}
+
+h2 {
+  margin: 13mm 0 4mm;
+  padding-top: 1mm;
+  font-size: 19pt;
+  border-top: 1.2mm solid var(--firefly);
+}
+
+h3 {
+  margin: 8mm 0 3mm;
+  font-size: 14pt;
+}
+
+h4 {
+  margin: 6mm 0 2mm;
+  font-size: 11.5pt;
+}
+
+p {
+  margin: 0 0 4mm;
+}
+
+ul,
+ol {
+  margin: 0 0 5mm 7mm;
+  padding: 0;
+}
+
+li {
+  margin: 1.4mm 0;
+}
+
+a {
+  color: #b46a00;
+  text-decoration: none;
+}
+
+strong {
+  color: #111827;
+}
+
+code {
+  padding: 0.2mm 1mm;
+  border-radius: 1mm;
+  color: #8a4b00;
+  background: #fff3cd;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9em;
+}
+
+pre {
+  margin: 4mm 0 6mm;
+  padding: 4mm 5mm;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  border-radius: 2mm;
+  color: var(--code-text);
+  background: var(--code-bg);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  break-inside: avoid;
+}
+
+pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 8.8pt;
+  line-height: 1.48;
+}
+
+table {
+  width: 100%;
+  margin: 4mm 0 7mm;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  border-radius: 2mm;
+  overflow: hidden;
+  break-inside: avoid;
+}
+
+thead {
+  background: #fff4cc;
+}
+
+th,
+td {
+  padding: 2.3mm 3mm;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+th {
+  color: #653a00;
+  font-size: 8.7pt;
+  font-weight: 750;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+td {
+  font-size: 9.4pt;
+}
+
+tr:nth-child(even) td {
+  background: #fbfcfd;
+}
+
+blockquote {
+  margin: 5mm 0;
+  padding: 3mm 5mm;
+  border-left: 1.2mm solid var(--firefly);
+  color: #4b5563;
+  background: #fffaf0;
+}
+
+hr {
+  height: 1px;
+  margin: 9mm 0;
+  border: 0;
+  background: var(--line);
+}
+
+.endpoint-card {
+  margin: 5mm 0;
+  padding: 4mm 5mm;
+  border: 1px solid #f4d87a;
+  border-radius: 2mm;
+  background: #fffdf5;
+}
+
+.pdf-header {
+  width: 100%;
+  padding: 0 10mm;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 8pt;
+  color: #667085;
+}
+
+.pdf-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-bottom: 2mm;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.pdf-header img {
+  width: 28mm;
+  height: auto;
+}
+
+.pdf-footer {
+  width: 100%;
+  padding: 0 10mm;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 8pt;
+  color: #667085;
+}
+
+.pdf-footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-top: 2mm;
+  border-top: 1px solid #eaecf0;
+}
+
+.pageNumber,
+.totalPages {
+  font-variant-numeric: tabular-nums;
+}

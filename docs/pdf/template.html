@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{TITLE}}</title>
+    <link rel="stylesheet" href="{{CSS_PATH}}" />
+  </head>
+  <body>
+    <section class="cover-page">
+      <header class="cover-header">
+        <img class="cover-logo" src="{{LOGO_SRC}}" alt="Firefly" />
+        <div class="cover-kicker">Macrolet Firefly</div>
+      </header>
+
+      <main class="cover-main">
+        <div class="cover-label">Customer Integration Reference</div>
+        <h1>Firefly Public API<br />Integration Guide</h1>
+        <p class="cover-subtitle">
+          HTTP API reference for customer systems integrating with Macrolet
+          Firefly light-guided picking devices.
+        </p>
+
+        <dl class="cover-meta">
+          <div>
+            <dt>Document version</dt>
+            <dd>{{DOC_VERSION}}</dd>
+          </div>
+          <div>
+            <dt>Document date</dt>
+            <dd>{{DOC_DATE}}</dd>
+          </div>
+          <div>
+            <dt>API namespace</dt>
+            <dd>{{API_NAMESPACE}}</dd>
+          </div>
+        </dl>
+      </main>
+
+      <footer class="cover-footer">
+        <span>Macrolet Solutions</span>
+        <span>Firefly API Service</span>
+      </footer>
+    </section>
+
+    <section class="toc-page">
+      <div class="section-eyebrow">Reference Map</div>
+      <h2>Contents</h2>
+      {{TOC}}
+    </section>
+
+    <article class="document-content">
+      {{CONTENT}}
+    </article>
+  </body>
+</html>

@@ -46,6 +46,7 @@ export interface FireflySegment {
   segment_num_in_channel: number;
   first_led_index: number;
   last_led_index: number;
+  mode: "static" | "dynamic";
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +56,7 @@ export interface FireflySegmentInput {
   segment_num_in_channel: number;
   first_led_index: number;
   last_led_index: number;
+  mode: "static" | "dynamic";
 }
 
 export interface FireflySlot {

@@ -35,6 +35,27 @@ class UpdateAllSlotsRequest(BaseModel):
     timeout_ms: int | None = Field(default=None, alias="timeoutMs", ge=1)
 
 
+class LoadSlotIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    external_slot_id: str = Field(alias="externalSlotId", pattern=EXTERNAL_SLOT_ID_PATTERN)
+    num_leds: int = Field(alias="numLeds", ge=1)
+
+
+class LoadSlotsSegmentIn(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    channel_num: int = Field(alias="channelNum", ge=1)
+    segment_num_in_channel: int = Field(alias="segmentNumInChannel", ge=1)
+    slots: list[LoadSlotIn]
+
+
+class LoadSlotsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    segments: list[LoadSlotsSegmentIn] = Field(min_length=1)
+
+
 class CommandResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

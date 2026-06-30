@@ -20,6 +20,8 @@ Inbound message shape (all are plain ``dict``):
 - ``{"type": "submit_update_all_slots", "to_state": str, "pattern": int,
    "pattern_value": int, "timeout_ms": int, "result_future": Future}``
 - ``{"type": "submit_reinitialize", "timeout_ms": int, "result_future": Future}``
+- ``{"type": "submit_load_slots", "init_slots": [...], "timeout_ms": int,
+    "result_future": Future}``
 - ``{"type": "reset", "result_future": Future}``
 - ``{"type": "get_snapshot"}`` -> returns dict (for tests + status endpoint)
 """
@@ -31,7 +33,7 @@ import logging
 import threading
 import uuid
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -705,6 +707,25 @@ class FireflyDeviceActor(pykka.ThreadingActor):
         self._cancel_command_timeout()
         self._start_init_slots_command(timeout_ms=timeout_ms, future=future)
 
+    def _handle_submit_load_slots(self, message: dict[str, Any]) -> None:
+        future: Future = message["result_future"]
+        timeout_ms: int = message.get("timeout_ms") or self._settings.ack_timeout_ms
+
+        if self.status is ActorStatus.REGISTER_ERROR:
+            _fail_future(
+                future,
+                CommandFailure(
+                    event_id="",
+                    error_code="register_error",
+                    error_description="Device is in register_error; reset required.",
+                ),
+            )
+            return
+
+        self._config = replace(self._config, init_slots=tuple(message["init_slots"]))
+        self._cancel_command_timeout()
+        self._start_init_slots_command(timeout_ms=timeout_ms, future=future)
+
     def _handle_reset(self, message: dict[str, Any]) -> None:
         """§5.3 Hard reset: fire-and-forget MQTT publish + session wipe."""
         future: Future = message["result_future"]
@@ -856,6 +877,7 @@ _DISPATCH: dict[str, Any] = {
     "submit_update_slot_state": FireflyDeviceActor._handle_submit_update_slot_state,
     "submit_update_all_slots": FireflyDeviceActor._handle_submit_update_all_slots,
     "submit_reinitialize": FireflyDeviceActor._handle_submit_reinitialize,
+    "submit_load_slots": FireflyDeviceActor._handle_submit_load_slots,
     "reset": FireflyDeviceActor._handle_reset,
     "get_snapshot": FireflyDeviceActor._handle_get_snapshot,
 }

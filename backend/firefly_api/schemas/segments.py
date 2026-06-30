@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from firefly_api.schemas.common import UtcDateTime
@@ -14,6 +16,7 @@ class _SegmentBase(BaseModel):
     segment_num_in_channel: int = Field(ge=1)
     first_led_index: int = Field(ge=1)
     last_led_index: int = Field(ge=1)
+    mode: Literal["static", "dynamic"] = "static"
 
 
 class FireflySegmentCreate(_SegmentBase):

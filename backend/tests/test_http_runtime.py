@@ -64,10 +64,21 @@ def seeded(
             "num_leds": 10,
         },
     ).json()
+    dynamic_segment = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 2,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 100,
+            "mode": "dynamic",
+        },
+    ).json()
     return {
         "broker": broker,
         "device": device,
         "segment": segment,
+        "dynamic_segment": dynamic_segment,
         "led_state": led_state,
         "slot": slot,
     }
@@ -241,6 +252,151 @@ def test_get_device_status_returns_online_after_boot(
     assert body["deviceName"] == seeded["device"]["name"]
     assert body["status"] == "online"
     assert body["currentTaskId"]
+
+
+def test_load_slots_dynamic_segment_refreshes_init_slots_and_update_mapping(
+    client: TestClient, seeded: dict, runtime: dict[str, Any]
+) -> None:
+    r = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/load-slots",
+        json={
+            "segments": [
+                {
+                    "channelNum": 2,
+                    "segmentNumInChannel": 1,
+                    "slots": [
+                        {"externalSlotId": "BOX-001", "numLeds": 12},
+                        {"externalSlotId": "BOX-002", "numLeds": 18},
+                    ],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "loaded"
+
+    slots_resp = client.get(f"/api/v1/admin/fireflies/{seeded['device']['id']}/slots")
+    assert slots_resp.status_code == 200, slots_resp.text
+    slots = slots_resp.json()
+    assert [(slot["external_slot_id"], slot["slot_index"]) for slot in slots] == [
+        ("S-001", 1),
+        ("BOX-001", 2),
+        ("BOX-002", 3),
+    ]
+    assert [
+        slot["segment_position"]
+        for slot in slots
+        if slot["external_slot_id"].startswith("BOX")
+    ] == [1, 2]
+    assert all(
+        slot["label"] == slot["external_slot_id"]
+        for slot in slots
+        if slot["external_slot_id"].startswith("BOX")
+    )
+
+    init_payload = runtime["mqtt"].last_payload("/init-slots")
+    assert init_payload["num-slots"] == 3
+    assert init_payload["slots"][-2:] == [
+        {
+            "slot-inx": 2,
+            "channel": 2,
+            "ch-segm": 1,
+            "pos-in-segm": 1,
+            "num-leds": 12,
+        },
+        {
+            "slot-inx": 3,
+            "channel": 2,
+            "ch-segm": 1,
+            "pos-in-segm": 2,
+            "num-leds": 18,
+        },
+    ]
+
+    update_resp = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/slots:update",
+        json={
+            "slots": [
+                {
+                    "externalSlotId": "BOX-002",
+                    "stateName": seeded["led_state"]["name"],
+                }
+            ]
+        },
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    update_payload = runtime["mqtt"].last_payload("/update-slot-state")
+    assert update_payload["slots"][0]["slot-inx"] == 3
+
+
+def test_load_slots_empty_slots_clears_dynamic_segment(
+    client: TestClient, seeded: dict, runtime: dict[str, Any]
+) -> None:
+    r_load = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/load-slots",
+        json={
+            "segments": [
+                {
+                    "channelNum": 2,
+                    "segmentNumInChannel": 1,
+                    "slots": [{"externalSlotId": "BOX-001", "numLeds": 12}],
+                }
+            ]
+        },
+    )
+    assert r_load.status_code == 200, r_load.text
+
+    r_clear = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/load-slots",
+        json={
+            "segments": [
+                {
+                    "channelNum": 2,
+                    "segmentNumInChannel": 1,
+                    "slots": [],
+                }
+            ]
+        },
+    )
+    assert r_clear.status_code == 200, r_clear.text
+
+    slots_resp = client.get(f"/api/v1/admin/fireflies/{seeded['device']['id']}/slots")
+    assert slots_resp.status_code == 200, slots_resp.text
+    assert [slot["external_slot_id"] for slot in slots_resp.json()] == ["S-001"]
+    assert runtime["mqtt"].last_payload("/init-slots")["num-slots"] == 1
+
+    update_resp = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/slots:update",
+        json={
+            "slots": [
+                {
+                    "externalSlotId": "BOX-001",
+                    "stateName": seeded["led_state"]["name"],
+                }
+            ]
+        },
+    )
+    assert update_resp.status_code == 422
+    assert update_resp.json()["errorCode"] == "invalid_external_slot_id"
+
+
+def test_load_slots_rejects_static_segment(
+    client: TestClient, seeded: dict, runtime: dict[str, Any]
+) -> None:
+    r = client.post(
+        f"/api/v1/public/fireflies/{seeded['device']['name']}/load-slots",
+        json={
+            "segments": [
+                {
+                    "channelNum": 1,
+                    "segmentNumInChannel": 1,
+                    "slots": [{"externalSlotId": "BOX-001", "numLeds": 12}],
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["errorCode"] == "dynamic_slot_layout_invalid"
 
 
 # ------------------------------------------------ admin command endpoints ----
