@@ -32,6 +32,7 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 docs/out/
+docs/pdf/out/
 
 # Local config overrides (the example is checked in)
 config/firefly-appsettings.json

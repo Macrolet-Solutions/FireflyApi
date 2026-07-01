@@ -358,6 +358,41 @@ figcaption {
   box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
 }
 
+.screenshot-figure {
+  padding: 3mm;
+  background: #f8fafc;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.08);
+}
+
+.screenshot-figure img {
+  border: 1px solid #d9e0e7;
+}
+
+.placeholder-figure {
+  padding: 6mm;
+  border: 1px dashed #d7a100;
+  background: #fffaf0;
+}
+
+.placeholder-box {
+  min-height: 36mm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6mm;
+  border-radius: 2mm;
+  color: #7a4a00;
+  background: repeating-linear-gradient(
+    -45deg,
+    #fff8df,
+    #fff8df 4mm,
+    #ffefb5 4mm,
+    #ffefb5 8mm
+  );
+  font-weight: 700;
+  text-align: center;
+}
+
 hr {
   height: 1px;
   margin: 9mm 0;

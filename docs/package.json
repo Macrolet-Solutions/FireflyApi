@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pdf:public-api": "node pdf/render-public-api.mjs"
+    "pdf:public-api": "node pdf/render-public-api.mjs",
+    "pdf:frontend": "node pdf/render-frontend.mjs",
+    "pdf": "npm run pdf:public-api && npm run pdf:frontend"
   },
   "devDependencies": {
     "marked": "^14.1.3",

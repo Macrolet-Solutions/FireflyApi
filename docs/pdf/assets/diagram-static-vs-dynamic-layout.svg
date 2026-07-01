@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">Static and dynamic Firefly layouts</title>
+  <desc id="desc">Comparison between a static fixed shelf layout with permanent slots and a dynamic cart layout where slot sizes and active positions can change per route.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#111827" flood-opacity="0.14"/>
+    </filter>
+    <linearGradient id="amber" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fff8df"/>
+      <stop offset="1" stop-color="#ffc107"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#eef6ff"/>
+      <stop offset="1" stop-color="#8ec5ff"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7a4a00"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="680" rx="32" fill="#ffffff"/>
+  <rect x="24" y="24" width="1152" height="632" rx="28" fill="#fffdf5" stroke="#f4d87a" stroke-width="2"/>
+
+  <text x="600" y="76" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" fill="#111827">Static vs dynamic slot layouts</text>
+  <text x="600" y="114" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#5b6573">Static layouts are configured once. Dynamic layouts can change for each operational route or job.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="160" width="500" height="440" rx="28" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <rect x="70" y="160" width="500" height="74" rx="28" fill="#fff4cc"/>
+    <path d="M70 206h500" stroke="#f4d87a" stroke-width="2"/>
+    <text x="320" y="207" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#111827">Static layout</text>
+    <text x="320" y="256" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#5b6573">Fixed shelf or fixed cart positions</text>
+
+    <rect x="130" y="306" width="380" height="126" rx="14" fill="#f8fafc" stroke="#cfd8e3" stroke-width="2"/>
+    <rect x="150" y="326" width="340" height="18" rx="9" fill="#111827"/>
+    <circle cx="175" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="218" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="261" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="304" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="347" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="390" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="433" cy="335" r="5" fill="#ffc107"/>
+    <circle cx="476" cy="335" r="5" fill="#ffc107"/>
+
+    <g font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">
+      <rect x="152" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="176" y="391" fill="#7a4a00">S1</text>
+      <rect x="202" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="226" y="391" fill="#7a4a00">S2</text>
+      <rect x="252" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="276" y="391" fill="#7a4a00">S3</text>
+      <rect x="302" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="326" y="391" fill="#7a4a00">S4</text>
+      <rect x="352" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="376" y="391" fill="#7a4a00">S5</text>
+      <rect x="402" y="364" width="48" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="426" y="391" fill="#7a4a00">S6</text>
+      <rect x="452" y="364" width="38" height="42" rx="8" fill="url(#amber)" stroke="#ffb300"/>
+      <text x="471" y="391" fill="#7a4a00">S7</text>
+    </g>
+
+    <g font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#46515f">
+      <circle cx="154" cy="480" r="7" fill="#ffc107"/>
+      <text x="176" y="486">Same slot positions every day</text>
+      <circle cx="154" cy="520" r="7" fill="#ffc107"/>
+      <text x="176" y="526">Configured manually in the frontend</text>
+      <circle cx="154" cy="560" r="7" fill="#ffc107"/>
+      <text x="176" y="566">Best for fixed shelves or fixed stations</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="630" y="160" width="500" height="440" rx="28" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <rect x="630" y="160" width="500" height="74" rx="28" fill="#eef6ff"/>
+    <path d="M630 206h500" stroke="#bcdcff" stroke-width="2"/>
+    <text x="880" y="207" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#111827">Dynamic layout</text>
+    <text x="880" y="256" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#5b6573">Changing boxes, widths, or active positions</text>
+
+    <rect x="690" y="296" width="380" height="62" rx="14" fill="#f8fafc" stroke="#cfd8e3" stroke-width="2"/>
+    <text x="880" y="322" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#111827">Route A</text>
+    <rect x="720" y="334" width="82" height="16" rx="8" fill="#111827"/>
+    <rect x="806" y="334" width="142" height="16" rx="8" fill="#111827"/>
+    <rect x="952" y="334" width="88" height="16" rx="8" fill="#111827"/>
+    <circle cx="742" cy="342" r="5" fill="#8ec5ff"/>
+    <circle cx="834" cy="342" r="5" fill="#8ec5ff"/>
+    <circle cx="974" cy="342" r="5" fill="#8ec5ff"/>
+
+    <rect x="690" y="382" width="380" height="62" rx="14" fill="#f8fafc" stroke="#cfd8e3" stroke-width="2"/>
+    <text x="880" y="408" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#111827">Route B</text>
+    <rect x="720" y="420" width="118" height="16" rx="8" fill="#111827"/>
+    <rect x="842" y="420" width="70" height="16" rx="8" fill="#111827"/>
+    <rect x="916" y="420" width="124" height="16" rx="8" fill="#111827"/>
+    <circle cx="748" cy="428" r="5" fill="#8ec5ff"/>
+    <circle cx="864" cy="428" r="5" fill="#8ec5ff"/>
+    <circle cx="944" cy="428" r="5" fill="#8ec5ff"/>
+
+    <path d="M758 268 C806 286 824 282 864 296" fill="none" stroke="#7a4a00" stroke-width="4" marker-end="url(#arrow)"/>
+    <text x="760" y="278" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" fill="#7a4a00">loaded by system</text>
+
+    <g font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#46515f">
+      <circle cx="714" cy="492" r="7" fill="#8ec5ff"/>
+      <text x="736" y="498">Slots can change by route or job</text>
+      <circle cx="714" cy="532" r="7" fill="#8ec5ff"/>
+      <text x="736" y="538">Loaded automatically by the warehouse system</text>
+      <circle cx="714" cy="572" r="7" fill="#8ec5ff"/>
+      <text x="736" y="578">Best for carts with variable boxes</text>
+    </g>
+  </g>
+
+  <line x1="600" y1="164" x2="600" y2="596" stroke="#e7ebef" stroke-width="3" stroke-dasharray="10 10"/>
+</svg>

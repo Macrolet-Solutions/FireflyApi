@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Firefly MQTT broker communication diagram</title>
+  <desc id="desc">The Firefly API Service and Firefly controllers connect to the MQTT broker, which routes commands and confirmations between them.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#111827" flood-opacity="0.14"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7a4a00"/>
+    </marker>
+    <linearGradient id="fireflyGradient" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fff8df"/>
+      <stop offset="1" stop-color="#ffc107"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="620" rx="32" fill="#ffffff"/>
+  <rect x="24" y="24" width="1152" height="572" rx="28" fill="#fffdf5" stroke="#f4d87a" stroke-width="2"/>
+
+  <text x="600" y="76" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" fill="#111827">How Firefly messages travel</text>
+  <text x="600" y="114" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#5b6573">The broker is the shared message exchange point between the service and the controllers.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="220" width="276" height="170" rx="22" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <circle cx="134" cy="284" r="34" fill="url(#fireflyGradient)" stroke="#ffb300" stroke-width="2"/>
+    <path d="M121 284h26M134 271v26M122 296l25-25M122 272l25 25" stroke="#7a4a00" stroke-width="4" stroke-linecap="round"/>
+    <text x="210" y="274" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700" fill="#111827">Firefly API</text>
+    <text x="210" y="306" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700" fill="#111827">Service</text>
+    <text x="210" y="344" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" fill="#5b6573">Receives work requests</text>
+    <text x="210" y="368" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" fill="#5b6573">and sends light commands</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="462" y="198" width="276" height="214" rx="28" fill="#111827"/>
+    <rect x="490" y="236" width="220" height="94" rx="18" fill="#ffffff" opacity="0.96"/>
+    <circle cx="540" cy="284" r="20" fill="#ffc107"/>
+    <circle cx="600" cy="284" r="20" fill="#ffb300"/>
+    <circle cx="660" cy="284" r="20" fill="#ff8f00"/>
+    <text x="600" y="364" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="27" font-weight="700" fill="#ffffff">MQTT Broker</text>
+    <text x="600" y="392" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" fill="#d9e0e7">Message exchange point</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="852" y="154" width="276" height="116" rx="22" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <rect x="888" y="188" width="56" height="54" rx="10" fill="#fff4cc" stroke="#ffb300" stroke-width="2"/>
+    <circle cx="902" cy="254" r="5" fill="#ffc107"/>
+    <circle cx="918" cy="254" r="5" fill="#ffc107"/>
+    <circle cx="934" cy="254" r="5" fill="#ffc107"/>
+    <text x="1006" y="208" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#111827">Controller 1</text>
+    <text x="1006" y="238" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#5b6573">Cart / shelf / station</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="852" y="310" width="276" height="116" rx="22" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <rect x="888" y="344" width="56" height="54" rx="10" fill="#fff4cc" stroke="#ffb300" stroke-width="2"/>
+    <circle cx="902" cy="410" r="5" fill="#ffc107"/>
+    <circle cx="918" cy="410" r="5" fill="#ffc107"/>
+    <circle cx="934" cy="410" r="5" fill="#ffc107"/>
+    <text x="1006" y="364" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#111827">Controller 2</text>
+    <text x="1006" y="394" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#5b6573">Another physical device</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="852" y="466" width="276" height="88" rx="22" fill="#ffffff" stroke="#d9e0e7" stroke-width="2"/>
+    <text x="990" y="506" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" fill="#111827">More controllers</text>
+    <text x="990" y="534" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#5b6573">All connect to the same broker</text>
+  </g>
+
+  <path d="M348 286 C390 286 418 286 462 286" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+  <path d="M462 326 C418 326 390 326 348 326" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+  <text x="405" y="258" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#7a4a00">commands</text>
+  <text x="405" y="356" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#7a4a00">confirmations</text>
+
+  <path d="M738 260 C790 230 810 210 852 210" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+  <path d="M852 242 C812 262 790 278 738 300" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+
+  <path d="M738 344 C790 354 810 366 852 370" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+  <path d="M852 398 C812 396 790 386 738 374" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)"/>
+
+  <path d="M690 412 C758 470 798 506 852 510" fill="none" stroke="#7a4a00" stroke-width="5" marker-end="url(#arrow)" opacity="0.72"/>
+
+  <text x="600" y="560" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" fill="#5b6573">The broker routes each message to the right destination, like a dispatch desk for device communication.</text>
+</svg>
