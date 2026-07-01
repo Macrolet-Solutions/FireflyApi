@@ -82,7 +82,12 @@ A Firefly device is addressed by `deviceName` in the public API URL:
 
 ### Segments
 
-A segment is a physical LED range on a Firefly controller. Segments are configured in the frontend and are identified by:
+A segment is a physical LED strip connected to a Firefly controller. For example, in multi-level layouts such as picking carts, each level has a physical LED strip, connected to the next via cable. Segments are configured in the frontend and are identified by:
+
+<figure class="concept-figure">
+  <img src="pdf/assets/drawing-segments.png" alt="Firefly segment layout showing LED strips connected by channel and segment numbering." />
+  <figcaption>Example segment layout: each physical LED strip is configured as a segment and addressed by channel number and segment number within the channel.</figcaption>
+</figure>
 
 | Field | Meaning |
 |---|---|

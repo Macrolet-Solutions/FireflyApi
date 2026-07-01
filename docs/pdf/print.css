@@ -328,6 +328,36 @@ blockquote {
   background: #fffaf0;
 }
 
+figure {
+  margin: 5mm 0 7mm;
+  padding: 4mm;
+  border: 1px solid var(--line);
+  border-radius: 3mm;
+  background: #ffffff;
+  break-inside: avoid;
+}
+
+figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 2mm;
+}
+
+figcaption {
+  margin-top: 3mm;
+  color: var(--muted);
+  font-size: 9pt;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.concept-figure {
+  background: linear-gradient(180deg, #ffffff 0%, #fffdf5 100%);
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+}
+
 hr {
   height: 1px;
   margin: 9mm 0;

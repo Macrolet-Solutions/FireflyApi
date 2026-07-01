@@ -34,6 +34,7 @@ await fs.mkdir(outDir, { recursive: true });
 
 const html = template
   .replaceAll("{{TITLE}}", "Firefly Public API Integration Guide")
+  .replaceAll("{{DOCS_BASE_URI}}", pathToFileURL(`${docsRoot}${path.sep}`).href)
   .replaceAll("{{CSS_PATH}}", pathToFileURL(cssPath).href)
   .replaceAll("{{LOGO_SRC}}", logoSrc)
   .replaceAll("{{DOC_VERSION}}", escapeHtml(metadata["Document version"] ?? "0.1"))
