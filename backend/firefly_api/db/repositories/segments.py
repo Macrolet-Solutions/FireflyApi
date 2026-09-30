@@ -116,6 +116,50 @@ def create(db: Session, device_id: int, data: FireflySegmentCreate) -> FireflySe
     return segment
 
 
+def copy_from_device(
+    db: Session, device_id: int, source_device_id: int
+) -> list[FireflySegment]:
+    if list_for_device(db, device_id):
+        raise ConflictError(
+            "Segments can only be copied to a device with no configured segments.",
+            error_code="segments_already_configured",
+        )
+    if device_id == source_device_id:
+        raise ValidationFailedError(
+            "Select a different source device.",
+            error_code="invalid_segment_source",
+        )
+    source_segments = list_for_device(db, source_device_id)
+    if not source_segments:
+        raise ValidationFailedError(
+            "The source device has no configured segments.",
+            error_code="source_segments_empty",
+        )
+    segments = [
+        FireflySegment(
+            device_id=device_id,
+            channel_num=source.channel_num,
+            segment_num_in_channel=source.segment_num_in_channel,
+            first_led_index=source.first_led_index,
+            last_led_index=source.last_led_index,
+            mode=source.mode,
+        )
+        for source in source_segments
+    ]
+    db.add_all(segments)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(
+            "The destination segment configuration changed. Refresh and try again.",
+            error_code="segment_conflict",
+        ) from exc
+    for segment in segments:
+        db.refresh(segment)
+    return segments
+
+
 def update(
     db: Session,
     device_id: int,

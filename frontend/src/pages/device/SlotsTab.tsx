@@ -200,6 +200,7 @@ export function SlotsTab({ deviceId }: Props) {
   const update = useUpdateSlot(deviceId);
   const del = useDeleteSlot(deviceId);
   const replace = useReplaceSlots(deviceId);
+  const removeAll = useReplaceSlots(deviceId);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<FireflySlot | null>(null);
@@ -276,6 +277,32 @@ export function SlotsTab({ deviceId }: Props) {
     }
   };
 
+  const handleRemoveAll = async () => {
+    if (
+      !slotsQ.isSuccess || slots.length === 0 || removeAll.isPending ||
+      replace.isPending || create.isPending || update.isPending || del.isPending
+    ) return;
+    if (!confirm(
+      `Remove all ${slots.length} slots from this Firefly device across every segment, including static and dynamic slots hidden by filters? Segments will be kept. This cannot be undone.`,
+    )) return;
+
+    try {
+      await removeAll.mutateAsync({ slots: [] });
+      setSegmentFilter(null);
+      notifications.show({
+        color: "teal",
+        title: "All slots removed",
+        message: "Reinitialize the device to apply the change.",
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        title: "Could not remove all slots",
+        message: isApiError(error) ? error.description : String(error),
+      });
+    }
+  };
+
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
@@ -327,7 +354,7 @@ export function SlotsTab({ deviceId }: Props) {
             variant="default"
             leftSection={<IconUpload size={16} />}
             onClick={() => fileInputRef.current?.click()}
-            disabled={staticSegmentOptions.length === 0 || replace.isPending}
+            disabled={staticSegmentOptions.length === 0 || replace.isPending || removeAll.isPending}
           >
             Import XLSX
           </Button>
@@ -341,9 +368,22 @@ export function SlotsTab({ deviceId }: Props) {
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => setAdding(true)}
-            disabled={staticSegmentOptions.length === 0}
+            disabled={staticSegmentOptions.length === 0 || removeAll.isPending}
           >
             Add slot
+          </Button>
+          <Button
+            color="red"
+            variant="light"
+            leftSection={<IconTrash size={16} />}
+            onClick={() => void handleRemoveAll()}
+            loading={removeAll.isPending}
+            disabled={
+              !slotsQ.isSuccess || slots.length === 0 || replace.isPending ||
+              create.isPending || update.isPending || del.isPending
+            }
+          >
+            Remove all slots
           </Button>
         </Group>
       </Group>
@@ -432,7 +472,7 @@ export function SlotsTab({ deviceId }: Props) {
                         <ActionIcon
                           variant="subtle"
                           onClick={() => setEditing(slot)}
-                          disabled={isDynamic}
+                          disabled={isDynamic || removeAll.isPending}
                         >
                           <IconPencil size={16} />
                         </ActionIcon>
@@ -441,7 +481,7 @@ export function SlotsTab({ deviceId }: Props) {
                         <ActionIcon
                           color="red"
                           variant="subtle"
-                          disabled={isDynamic}
+                          disabled={isDynamic || removeAll.isPending}
                           onClick={async () => {
                             if (
                               !confirm(

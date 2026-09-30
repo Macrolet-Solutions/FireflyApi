@@ -3,10 +3,74 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from firefly_api.db.models import FireflySlot
 
 
 def _slot_url(device_id: int) -> str:
     return f"/api/v1/admin/fireflies/{device_id}/slots"
+
+
+def test_replace_with_empty_list_removes_all_slots_only_for_selected_device(
+    client: TestClient, db: Session, device: dict, segment: dict, broker: dict
+) -> None:
+    other_device = client.post(
+        "/api/v1/admin/fireflies",
+        json={"name": "OTHER", "mqtt_broker_id": broker["id"]},
+    ).json()
+    other_segment = client.post(
+        f"/api/v1/admin/fireflies/{other_device['id']}/segments",
+        json={
+            "channel_num": 1, "segment_num_in_channel": 1,
+            "first_led_index": 1, "last_led_index": 150,
+        },
+    ).json()
+    for target_device, target_segment in ((device, segment), (other_device, other_segment)):
+        response = client.post(
+            _slot_url(target_device["id"]),
+            json={
+                "segment_id": target_segment["id"], "external_slot_id": "S1",
+                "segment_position": 1, "num_leds": 10,
+            },
+        )
+        assert response.status_code == 201, response.text
+    dynamic_segment = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/segments",
+        json={
+            "channel_num": 2, "segment_num_in_channel": 1,
+            "first_led_index": 1, "last_led_index": 150, "mode": "dynamic",
+        },
+    ).json()
+    db.add(FireflySlot(
+        device_id=device["id"], segment_id=dynamic_segment["id"],
+        slot_index=2, external_slot_id="D1", segment_position=1, num_leds=10,
+    ))
+    db.commit()
+    other_slots = client.get(_slot_url(other_device["id"])).json()
+    segments_url = f"/api/v1/admin/fireflies/{device['id']}/segments"
+    original_segments = client.get(segments_url).json()
+    assert len(client.get(_slot_url(device["id"])).json()) == 2
+
+    response = client.put(f"{_slot_url(device['id'])}:replace", json={"slots": []})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+    assert client.get(_slot_url(device["id"])).json() == []
+    assert client.get(_slot_url(other_device["id"])).json() == other_slots
+    assert client.get(segments_url).json() == original_segments
+    assert client.put(
+        f"{_slot_url(device['id'])}:replace", json={"slots": []}
+    ).status_code == 200
+    response = client.post(
+        _slot_url(device["id"]),
+        json={
+            "segment_id": segment["id"], "external_slot_id": "NEW",
+            "segment_position": 1, "num_leds": 10,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["slot_index"] == 1
 
 
 def test_create_assigns_slot_index_starting_at_one(

@@ -280,6 +280,8 @@ The Segments tab describes the physical LED strips connected to a device.
 
 To add a segment, use Add segment.
 
+When the device has no configured segments, **Copy from another device** is also available. Select a source device with configured segments, then choose **Copy segments**. All channel numbers, segment numbers, first and last LED indices (including direction), and static/dynamic modes are copied together. Slots are not copied, and the source device is unchanged. Existing destination segments cannot be overwritten with this action. Reset the destination device after copying.
+
 <figure class="screenshot-figure">
   <img src="pdf/assets/screenshots/Segments/Add Segments Dialog.png" alt="Add Segment dialog." />
   <figcaption>Add Segment dialog used to define the physical LED range and choose static or dynamic mode.</figcaption>
@@ -331,6 +333,8 @@ Fields:
 | Number of LEDs | How many LEDs are assigned to this slot. |
 
 After adding, editing, deleting, or importing static slots, reinitialize the device.
+
+Use **Remove all slots** to clear every slot from the selected device after confirmation, including static and dynamic slots hidden by the current segment filter. Segments and other devices are unchanged. This cannot be undone; export a backup first if needed, then reinitialize the device after removal.
 
 Import and export are useful for fixed installations with many slots. Export creates an Excel file that can be reviewed or used as a backup. Import replaces the current static slot layout for the device, so it should be used carefully.
 

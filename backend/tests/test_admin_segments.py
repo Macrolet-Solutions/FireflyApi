@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from firefly_api.core.errors import ConflictError
+from firefly_api.db.repositories import segments as repo
 
 
 def _seg_url(device_id: int) -> str:
@@ -200,3 +206,123 @@ def test_unknown_segment_returns_404(client: TestClient, device: dict) -> None:
     r = client.get(f"{_seg_url(device['id'])}/9999")
     assert r.status_code == 404
     assert r.json()["errorCode"] == "segment_not_found"
+
+
+@pytest.fixture
+def destination(client: TestClient, broker: dict) -> dict:
+    response = client.post(
+        "/api/v1/admin/fireflies",
+        json={"name": "FF02", "mqtt_broker_id": broker["id"]},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_copy_segments_preserves_configuration(
+    client: TestClient, device: dict, segment: dict, destination: dict
+) -> None:
+    response = client.post(
+        _seg_url(device["id"]),
+        json={
+            "channel_num": 2,
+            "segment_num_in_channel": 3,
+            "first_led_index": 150,
+            "last_led_index": 1,
+            "mode": "dynamic",
+        },
+    )
+    assert response.status_code == 201, response.text
+    slot = client.post(
+        f"/api/v1/admin/fireflies/{device['id']}/slots",
+        json={
+            "segment_id": segment["id"],
+            "external_slot_id": "S1",
+            "segment_position": 1,
+            "num_leds": 10,
+        },
+    )
+    assert slot.status_code == 201, slot.text
+    source = client.get(_seg_url(device["id"])).json()
+    response = client.post(
+        f"{_seg_url(destination['id'])}/copy-from/{device['id']}"
+    )
+    assert response.status_code == 201, response.text
+    copied = response.json()
+    fields = (
+        "channel_num", "segment_num_in_channel", "first_led_index", "last_led_index", "mode"
+    )
+    assert len(copied) == len(source)
+    for original, copy in zip(source, copied, strict=True):
+        assert {field: copy[field] for field in fields} == {
+            field: original[field] for field in fields
+        }
+        assert copy["id"] != original["id"]
+        assert copy["device_id"] == destination["id"]
+    assert client.get(_seg_url(destination["id"])).json() == copied
+    assert client.get(_seg_url(device["id"])).json() == source
+    assert client.get(f"/api/v1/admin/fireflies/{destination['id']}/slots").json() == []
+
+
+def test_copy_segments_rejects_nonempty_destination(
+    client: TestClient, device: dict, segment: dict, destination: dict
+) -> None:
+    response = client.post(f"{_seg_url(device['id'])}/copy-from/{destination['id']}")
+    assert response.status_code == 409
+    assert response.json()["errorCode"] == "segments_already_configured"
+    assert client.get(_seg_url(device["id"])).json() == [segment]
+
+
+def test_copy_segments_rejects_empty_source(
+    client: TestClient, device: dict, destination: dict
+) -> None:
+    response = client.post(f"{_seg_url(destination['id'])}/copy-from/{device['id']}")
+    assert response.status_code == 422
+    assert response.json()["errorCode"] == "source_segments_empty"
+    assert client.get(_seg_url(destination["id"])).json() == []
+
+
+def test_copy_segments_rejects_same_device(client: TestClient, device: dict) -> None:
+    response = client.post(f"{_seg_url(device['id'])}/copy-from/{device['id']}")
+    assert response.status_code == 422
+    assert response.json()["errorCode"] == "invalid_segment_source"
+
+
+def test_copy_segments_rejects_missing_source(client: TestClient, device: dict) -> None:
+    response = client.post(f"{_seg_url(device['id'])}/copy-from/9999")
+    assert response.status_code == 404
+    assert client.get(_seg_url(device["id"])).json() == []
+
+
+def test_copy_segments_rejects_missing_destination(client: TestClient, device: dict) -> None:
+    response = client.post(f"{_seg_url(9999)}/copy-from/{device['id']}")
+    assert response.status_code == 404
+
+
+def test_copy_segments_rolls_back_on_failure(
+    client: TestClient,
+    db: Session,
+    device: dict,
+    segment: dict,
+    destination: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = client.post(
+        _seg_url(device["id"]),
+        json={
+            "channel_num": 2,
+            "segment_num_in_channel": 1,
+            "first_led_index": 1,
+            "last_led_index": 50,
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    def fail_commit() -> None:
+        db.flush()
+        raise IntegrityError("INSERT", {}, Exception("Simulated failure"))
+
+    monkeypatch.setattr(db, "commit", fail_commit)
+    with pytest.raises(ConflictError):
+        repo.copy_from_device(db, destination["id"], device["id"])
+    assert repo.list_for_device(db, destination["id"]) == []
+    assert len(repo.list_for_device(db, device["id"])) == 2

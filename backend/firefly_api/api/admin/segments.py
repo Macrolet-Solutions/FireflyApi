@@ -35,6 +35,15 @@ def create_segment(device_id: int, data: FireflySegmentCreate, db: DbSession) ->
     return repo.create(db, device_id, data)
 
 
+@router.post(
+    "/copy-from/{source_device_id}",
+    response_model=list[FireflySegmentOut],
+    status_code=status.HTTP_201_CREATED,
+)
+def copy_segments(device_id: int, source_device_id: int, db: DbSession) -> list:
+    return repo.copy_from_device(db, device_id, source_device_id)
+
+
 @router.put("/{segment_id}", response_model=FireflySegmentOut)
 def update_segment(
     device_id: int,

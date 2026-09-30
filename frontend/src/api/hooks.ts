@@ -199,6 +199,18 @@ export function useSegments(deviceId: number | undefined) {
   });
 }
 
+export function useCopySegments(deviceId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceDeviceId: number) =>
+      api.post<FireflySegment[]>(
+        `${ADMIN}/fireflies/${deviceId}/segments/copy-from/${sourceDeviceId}`,
+      ),
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ["segments", deviceId] }),
+  });
+}
+
 export function useCreateSegment(deviceId: number) {
   const qc = useQueryClient();
   return useMutation({

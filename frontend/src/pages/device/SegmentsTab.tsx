@@ -15,12 +15,14 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
-import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { isApiError } from "@/api/client";
 import {
+  useCopySegments,
   useCreateSegment,
   useDeleteSegment,
+  useDevices,
   useSegments,
   useUpdateSegment,
 } from "@/api/hooks";
@@ -86,6 +88,7 @@ export function SegmentsTab({ deviceId }: Props) {
   const del = useDeleteSegment(deviceId);
   const [editing, setEditing] = useState<FireflySegment | null>(null);
   const [adding, setAdding] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [channelFilter, setChannelFilter] = useState<string | null>(null);
   const [segmentInChannelFilter, setSegmentInChannelFilter] = useState<
     string | null
@@ -145,9 +148,20 @@ export function SegmentsTab({ deviceId }: Props) {
             the registration response.
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setAdding(true)}>
-          Add segment
-        </Button>
+        <Group>
+          {q.isSuccess && segments.length === 0 && (
+            <Button
+              variant="default"
+              leftSection={<IconCopy size={16} />}
+              onClick={() => setCopying(true)}
+            >
+              Copy from another device
+            </Button>
+          )}
+          <Button leftSection={<IconPlus size={16} />} onClick={() => setAdding(true)}>
+            Add segment
+          </Button>
+        </Group>
       </Group>
 
       <ResetRequiredBanner scope="segments" />
@@ -267,6 +281,15 @@ export function SegmentsTab({ deviceId }: Props) {
         </Table.ScrollContainer>
       </Card>
 
+      {copying && (
+        <CopySegmentsDialog
+          key={deviceId}
+          deviceId={deviceId}
+          canCopy={q.isSuccess && segments.length === 0}
+          onClose={() => setCopying(false)}
+        />
+      )}
+
       <SegmentDialog
         opened={adding || !!editing}
         editing={editing}
@@ -306,6 +329,103 @@ export function SegmentsTab({ deviceId }: Props) {
         }}
       />
     </Stack>
+  );
+}
+
+function CopySegmentsDialog({
+  deviceId,
+  canCopy,
+  onClose,
+}: {
+  deviceId: number;
+  canCopy: boolean;
+  onClose: () => void;
+}) {
+  const devices = useDevices();
+  const [sourceDeviceId, setSourceDeviceId] = useState<string | null>(null);
+  const source = useSegments(sourceDeviceId ? Number(sourceDeviceId) : undefined);
+  const copy = useCopySegments(deviceId);
+  const deviceOptions = (devices.data ?? [])
+    .filter((device) => device.id !== deviceId)
+    .map((device) => ({
+      value: String(device.id),
+      label: device.display_name
+        ? `${device.display_name} (${device.name})`
+        : device.name,
+    }));
+
+  return (
+    <Modal
+      opened
+      onClose={() => {
+        if (!copy.isPending) onClose();
+      }}
+      title="Copy from another device"
+      centered
+      closeOnClickOutside={!copy.isPending}
+      closeOnEscape={!copy.isPending}
+      withCloseButton={!copy.isPending}
+    >
+      <Stack>
+        <ErrorAlert error={devices.error || source.error || copy.error} />
+        <Select
+          label="Source device"
+          placeholder={devices.isPending ? "Loading devices..." : "Select a device"}
+          data={deviceOptions}
+          value={sourceDeviceId}
+          onChange={(value) => {
+            setSourceDeviceId(value);
+            copy.reset();
+          }}
+          searchable
+          nothingFoundMessage="No other devices found"
+          disabled={devices.isPending || devices.isError || copy.isPending}
+        />
+        {devices.isSuccess && deviceOptions.length === 0 && (
+          <Text size="sm" c="dimmed">No other devices available.</Text>
+        )}
+        {sourceDeviceId && source.isPending && (
+          <Text size="sm" c="dimmed">Loading segments...</Text>
+        )}
+        {sourceDeviceId && source.isSuccess && (
+          <Text size="sm" c="dimmed">
+            {source.data.length === 0
+              ? "This device has no configured segments."
+              : `${source.data.length} segment${source.data.length === 1 ? "" : "s"}`}
+          </Text>
+        )}
+        {!canCopy && (
+          <Text size="sm" c="red">This device already has configured segments.</Text>
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={onClose} disabled={copy.isPending}>
+            Cancel
+          </Button>
+          <Button
+            leftSection={<IconCopy size={16} />}
+            loading={copy.isPending}
+            disabled={
+              !canCopy || !sourceDeviceId || !source.isSuccess || source.data.length === 0
+            }
+            onClick={() => {
+              if (!sourceDeviceId || !canCopy || copy.isPending) return;
+              copy.mutate(Number(sourceDeviceId), {
+                onSuccess: () => {
+                  notifications.show({
+                    color: "teal",
+                    title: "Segments copied",
+                    message: "Remember to reset the device.",
+                  });
+                  onClose();
+                },
+              });
+            }}
+          >
+            Copy segments
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
