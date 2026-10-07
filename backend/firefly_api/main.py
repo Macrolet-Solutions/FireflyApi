@@ -17,8 +17,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from firefly_api.api.firefly_upd import router as firefly_upd_router
 from firefly_api.api.admin import admin_router
+from firefly_api.api.auth import router as auth_router
+from firefly_api.api.firefly_upd import router as firefly_upd_router
 from firefly_api.api.public import public_router
 from firefly_api.core.config import AppConfig
 from firefly_api.core.errors import register_exception_handlers
@@ -53,6 +54,7 @@ def create_app(config: AppConfig) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(firefly_upd_router)
     app.include_router(admin_router)
+    app.include_router(auth_router)
     app.include_router(public_router)
     _mount_frontend_if_present(app, config)
 

@@ -1,5 +1,6 @@
 import {
   AppShell,
+  Button,
   Burger,
   Group,
   NavLink,
@@ -21,6 +22,11 @@ import {
 import { NavLink as RouterNavLink, Outlet, useLocation } from "react-router-dom";
 import { BrokerStatusBadge } from "@/components/BrokerStatusBadge";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { IconUser, IconUsers } from "@tabler/icons-react";
+import { useState } from "react";
+import { useAuth } from "@/auth/AuthContext";
+import { isApiError, logoutAuth } from "@/api/client";
+import { notifications } from "@mantine/notifications";
 
 interface NavItem {
   to: string;
@@ -39,6 +45,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function AppLayout() {
+  const { user } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
   const [opened, { toggle }] = useDisclosure();
   const location = useLocation();
 
@@ -77,6 +85,20 @@ export function AppLayout() {
             </div>
           </Group>
           <Group gap="xs">
+            <Text size="sm">{user?.username} ({user?.role})</Text>
+            <Button variant="subtle" loading={loggingOut} onClick={async () => {
+              setLoggingOut(true);
+              try {
+                await logoutAuth();
+              } catch (e) {
+                notifications.show({
+                  color: "red", title: "Logout failed",
+                  message: isApiError(e) ? e.description : String(e),
+                });
+              } finally {
+                setLoggingOut(false);
+              }
+            }}>Logout</Button>
             <BrokerStatusBadge />
             <ThemeToggle />
           </Group>
@@ -85,7 +107,11 @@ export function AppLayout() {
 
       <AppShell.Navbar p="xs">
         <AppShell.Section grow component={ScrollArea}>
-          {NAV_ITEMS.map((item) => (
+          {[
+            ...NAV_ITEMS.filter((item) => item.to !== "/manual-test" || user?.role === "admin"),
+            { to: "/account", label: "My account", icon: <IconUser size={18} /> },
+            ...(user?.role === "admin" ? [{ to: "/users", label: "Users", icon: <IconUsers size={18} /> }] : []),
+          ].map((item) => (
             <NavLink
               key={item.to}
               component={RouterNavLink}

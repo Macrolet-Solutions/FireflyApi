@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from firefly_api.core.auth import initialize_auth
 from firefly_api.core.config import (
     AppConfig,
     DatabaseConfig,
@@ -82,7 +83,15 @@ def client(
     """
     app = create_app(app_config)
     app.state.session_factory = session_factory
+    with session_factory() as db:
+        initialize_auth(db)
     with TestClient(app) as c:
+        response = c.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin"},
+            headers={"X-Firefly-CSRF": "1"},
+        )
+        assert response.status_code == 200, response.text
+        c.headers["Authorization"] = f"Bearer {response.json()['accessToken']}"
         yield c
 
 

@@ -41,6 +41,7 @@ import type {
   FireflySlotImportRow,
 } from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { AdminOnly } from "@/auth/AuthContext";
 import {
   SortableTableHeader,
   type SortDirection,
@@ -350,6 +351,7 @@ export function SlotsTab({ deviceId }: Props) {
           >
             Export XLSX
           </Button>
+          <AdminOnly>
           <Button
             variant="default"
             leftSection={<IconUpload size={16} />}
@@ -385,6 +387,7 @@ export function SlotsTab({ deviceId }: Props) {
           >
             Remove all slots
           </Button>
+          </AdminOnly>
         </Group>
       </Group>
 
@@ -467,7 +470,7 @@ export function SlotsTab({ deviceId }: Props) {
                     <Text size="sm">{slot.label || "—"}</Text>
                   </Table.Td>
                   <Table.Td style={{ textAlign: "right" }}>
-                    <Group gap="xs" justify="flex-end">
+                    <AdminOnly><Group gap="xs" justify="flex-end">
                       <Tooltip label="Edit">
                         <ActionIcon
                           variant="subtle"
@@ -509,7 +512,7 @@ export function SlotsTab({ deviceId }: Props) {
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>
-                    </Group>
+                    </Group></AdminOnly>
                   </Table.Td>
                 </Table.Tr>
                 );

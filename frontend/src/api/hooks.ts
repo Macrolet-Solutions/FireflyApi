@@ -68,14 +68,9 @@ export function useDeleteBroker() {
 
 export function useTestBrokerConnection() {
   return useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(
-        `${ADMIN}/mqtt-brokers/${id}:test-connection`,
-        { method: "POST" },
-      );
-      const body = (await res.json()) as TestConnectionResult;
-      return body;
-    },
+    mutationFn: (id: number) => api.post<TestConnectionResult>(
+      `${ADMIN}/mqtt-brokers/${id}:test-connection`, undefined, [502],
+    ),
   });
 }
 

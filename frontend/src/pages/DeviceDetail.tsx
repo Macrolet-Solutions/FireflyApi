@@ -44,6 +44,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { fmtAbs, fmtRel } from "@/lib/format";
 import { SegmentsTab } from "@/pages/device/SegmentsTab";
 import { SlotsTab } from "@/pages/device/SlotsTab";
+import { AdminOnly } from "@/auth/AuthContext";
 
 function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -137,7 +138,7 @@ export function DeviceDetail() {
             </Text>
           </Stack>
 
-          <Group>
+          <AdminOnly><Group>
             <Tooltip label="Push a fresh init-slots to apply slot changes.">
               <Button
                 variant="default"
@@ -180,7 +181,7 @@ export function DeviceDetail() {
                 Start actor
               </Button>
             </Tooltip>
-          </Group>
+          </Group></AdminOnly>
         </Group>
 
         <Divider my="md" />

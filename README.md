@@ -82,6 +82,25 @@ npm run dev
 - Backend OpenAPI: <http://127.0.0.1:8000/docs> by default; change
 	`server.host` / `server.port` in `config\firefly-appsettings.json` if needed.
 
+## Admin login and roles
+
+The frontend and `/api/v1/admin/*` require login. First startup creates
+`admin` / `admin` only if the `Users` table is empty. Change this known default
+password through **My account** promptly; startup never resets existing users.
+
+Admins manage users through **Users** and have full configuration/device-control
+access. Viewers can read configuration, status, and events, but cannot modify
+anything or run admin device actions. Broker passwords are never returned.
+The last enabled admin cannot be deleted, disabled, or demoted.
+
+Login survives browser restarts for up to 30 days using rotating HttpOnly refresh
+cookies and 15-minute JWT access tokens. Password, username, role, or enabled-status
+changes revoke that user's sessions. Logout revokes the current session.
+
+The public API remains public and unchanged, including its device commands.
+Use network-level access controls and HTTPS; see
+[`DEPLOYMENT.md`](DEPLOYMENT.md#authentication-and-transport).
+
 See [`backend/README.md`](backend/README.md) and
 [`frontend/README.md`](frontend/README.md) for the per-tier development
 workflow (tests, migrations, production build).

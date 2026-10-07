@@ -29,6 +29,7 @@ import {
 import type { FireflySegment } from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { ResetRequiredBanner } from "@/components/ResetRequiredBanner";
+import { AdminOnly } from "@/auth/AuthContext";
 import {
   SortableTableHeader,
   type SortDirection,
@@ -148,7 +149,7 @@ export function SegmentsTab({ deviceId }: Props) {
             the registration response.
           </Text>
         </div>
-        <Group>
+        <AdminOnly><Group>
           {q.isSuccess && segments.length === 0 && (
             <Button
               variant="default"
@@ -161,7 +162,7 @@ export function SegmentsTab({ deviceId }: Props) {
           <Button leftSection={<IconPlus size={16} />} onClick={() => setAdding(true)}>
             Add segment
           </Button>
-        </Group>
+        </Group></AdminOnly>
       </Group>
 
       <ResetRequiredBanner scope="segments" />
@@ -237,7 +238,7 @@ export function SegmentsTab({ deviceId }: Props) {
                       </Badge>
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
-                      <Group gap="xs" justify="flex-end">
+                      <AdminOnly><Group gap="xs" justify="flex-end">
                         <Tooltip label="Edit">
                           <ActionIcon
                             variant="subtle"
@@ -271,7 +272,7 @@ export function SegmentsTab({ deviceId }: Props) {
                             <IconTrash size={16} />
                           </ActionIcon>
                         </Tooltip>
-                      </Group>
+                      </Group></AdminOnly>
                     </Table.Td>
                   </Table.Tr>
                 );

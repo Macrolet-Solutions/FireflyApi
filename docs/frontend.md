@@ -4,8 +4,8 @@
 
 | Item | Value |
 |---|---|
-| Document version | 0.2 |
-| Document date | 2026-07-01 |
+| Document version | 0.3 |
+| Document date | 2026-10-06 |
 | Guide scope | Frontend use for warehouse operations and maintenance |
 | Guide status | Draft with screenshots and diagram placeholders |
 | Product | Macrolet Firefly API Service |
@@ -38,6 +38,31 @@ http://<firefly-api-host>:8000/
 
 The exact address depends on where the Firefly API Service is installed.
 
+## Signing In And User Roles
+
+Sign in with the username and password provided by your administrator. A new
+installation initially uses `admin` / `admin`; change this known default
+promptly through **My account**. New passwords must have 8-128 characters.
+Changing your password signs you out on all devices.
+
+| Role | Access |
+|---|---|
+| Viewer | Read configuration, controller status, and events; export slot data. No edits, imports, device actions, manual tests, or user management. |
+| Admin | All operations, including the **Users** screen for adding, editing, disabling, and deleting accounts. |
+
+Broker settings are visible to viewers, but passwords are never displayed.
+The last enabled admin cannot be disabled, demoted, or deleted.
+Changing a user's password, username, role, or enabled status signs that user
+out of all sessions.
+
+Login is remembered across browser restarts for up to 30 days. Use **Logout**
+when finished, especially on shared workstations. Disabled or deleted users
+lose access immediately on the server; an open screen returns to login when
+its session is checked or it next requests protected data.
+
+These roles restrict the admin console. External integrations continue to use
+the public API without a login.
+
 ## Main Screens
 
 The frontend is organized around a few practical tasks.
@@ -54,6 +79,8 @@ The frontend is organized around a few practical tasks.
 | Command Presets | Reusable combinations for manual testing. |
 | Manual Test | Send a test light command to one or more slots. |
 | Event Log | Detailed history of messages, errors, timeouts, and acknowledgements. |
+| My account | Change your own password (all roles). |
+| Users | Manage accounts and roles (admins only). |
 
 ## Core Concepts
 

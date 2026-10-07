@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from firefly_api.core.auth import initialize_auth
 from firefly_api.core.config import LoggingConfig
 from firefly_api.core.log_config import append_daily_log_line, configure_logging
 from firefly_api.main import create_app
@@ -16,7 +17,15 @@ from firefly_api.main import create_app
 def _make_client(app_config, session_factory: sessionmaker[Session]) -> TestClient:
     app = create_app(app_config)
     app.state.session_factory = session_factory
-    return TestClient(app)
+    with session_factory() as db:
+        initialize_auth(db)
+    client = TestClient(app)
+    token = client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"},
+        headers={"X-Firefly-CSRF": "1"},
+    ).json()["accessToken"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
 
 
 def test_configure_logging_writes_daily_log_file(

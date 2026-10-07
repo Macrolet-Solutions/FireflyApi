@@ -27,6 +27,7 @@ import type { FireflyLedState } from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { PageHeader } from "@/components/PageHeader";
 import { ResetRequiredBanner } from "@/components/ResetRequiredBanner";
+import { AdminOnly } from "@/auth/AuthContext";
 
 const HEX_RE = /^0x[0-9A-Fa-f]{6}$/;
 
@@ -68,9 +69,11 @@ export function LedStates() {
         title="LED states"
         description="Reusable low-level Firefly states (color + timing). Sent to devices in the registration response."
         right={
+          <AdminOnly>
           <Button leftSection={<IconPlus size={16} />} onClick={() => setAdding(true)}>
             Add LED state
           </Button>
+          </AdminOnly>
         }
       />
       <ResetRequiredBanner scope="led-states" />
@@ -122,7 +125,7 @@ export function LedStates() {
                   <Table.Td>{s.repeat_after_ms}</Table.Td>
                   <Table.Td>{s.num_repetitions}</Table.Td>
                   <Table.Td style={{ textAlign: "right" }}>
-                    <Group gap="xs" justify="flex-end">
+                    <AdminOnly><Group gap="xs" justify="flex-end">
                       <Tooltip label="Edit">
                         <ActionIcon
                           variant="subtle"
@@ -156,7 +159,7 @@ export function LedStates() {
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>
-                    </Group>
+                    </Group></AdminOnly>
                   </Table.Td>
                 </Table.Tr>
               ))}

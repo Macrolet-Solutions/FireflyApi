@@ -84,6 +84,50 @@ python -m firefly_api --config config\firefly-appsettings.json
 
 OpenAPI interactive docs: `http://127.0.0.1:8000/docs`.
 
+## Authentication
+
+Application bootstrap migrates the schema, persists a random JWT signing key in
+`auth_settings`, and seeds `admin` / `admin` only when `Users` is empty.
+Keep the database private and backed up: it contains password hashes, MQTT
+credentials, and the signing key. User passwords use Argon2id, not reversible
+encryption. New/changed passwords require 8-128 characters; the initial default
+is the deliberate exception. Usernames are trimmed and case-insensitive.
+
+| Endpoint | Behavior |
+|---|---|
+| `POST /api/v1/auth/login` | `{ "username": "...", "password": "..." }`; returns `accessToken`, `tokenType`, `expiresIn` (900 seconds), and `user`; sets the refresh cookie. |
+| `POST /api/v1/auth/refresh` | Rotates the refresh cookie and returns the same token response. |
+| `POST /api/v1/auth/logout` | Revokes the cookie's session and removes the cookie. |
+| `GET /api/v1/auth/me` | Returns the authenticated user, never a password/hash. |
+| `POST /api/v1/auth/password` | `{ "current_password": "...", "new_password": "..." }`; changes your password and revokes all your sessions. |
+| `GET/POST /api/v1/admin/users` | Admin-only user listing/creation. |
+| `PUT/DELETE /api/v1/admin/users/{id}` | Admin-only editing/deletion. |
+
+Cookie-based login/refresh/logout requests require `X-Firefly-CSRF: 1`.
+No cross-origin CORS access is enabled. Use `Authorization: Bearer <accessToken>`
+on admin API requests and on `me`/`password`. OpenAPI's **Authorize** accepts the
+access token. Authentication errors use the existing error envelope (401 for
+invalid credentials/sessions, 403 for insufficient permissions).
+
+User creation requires `username`, `password`, and `role` (`viewer` or `admin`);
+`enabled` defaults to true. PUT requires `username` and `role`, accepts `enabled`,
+and optionally accepts `password`; omitting/nulling the password keeps its hash.
+Creation/update/last-login timestamps are returned in UTC. Five failed logins
+lock an existing account for 15 minutes. Password resets through user management
+clear lockout state.
+
+Access JWTs expire after 15 minutes. Refresh sessions have an absolute 30-day
+lifetime, stored as token hashes in `user_sessions`; refresh does not extend
+this lifetime. Reusing a rotated token revokes its session. The frontend
+serializes refresh calls across tabs where the browser supports Web Locks.
+Logout revokes one session; password, username, role, or enabled-status changes
+revoke all sessions. Every admin request checks the database for revocation and
+the current role. The last enabled admin is protected by an atomic write guard.
+
+Viewers can GET admin resources except users, but cannot call modifying or
+device-control endpoints. MQTT passwords are excluded for all roles. Public
+routes and their commands remain unauthenticated and unchanged.
+
 ## Tests
 
 ```powershell

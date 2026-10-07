@@ -42,6 +42,9 @@ hidden = (
     + collect_submodules("paho.mqtt")
     + collect_submodules("pykka")
     + collect_submodules("apscheduler")
+    + collect_submodules("jwt")
+    + collect_submodules("argon2")
+    + collect_submodules("_argon2_cffi_bindings")
     + [
         "alembic.runtime.migration",
         "alembic.runtime.environment",

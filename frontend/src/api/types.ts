@@ -219,3 +219,26 @@ export const STATUS_COLORS: Record<DeviceStatusValue, string> = {
   offline: "red",
   register_error: "orange",
 };
+export interface User {
+  id: number;
+  username: string;
+  role: "viewer" | "admin";
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+}
+
+export interface UserInput {
+  username: string;
+  role: User["role"];
+  enabled: boolean;
+  password?: string;
+}
+
+export interface TokenResponse {
+  accessToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: User;
+}

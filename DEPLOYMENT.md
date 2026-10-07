@@ -11,6 +11,37 @@ touch Windows-specific APIs.
 
 ---
 
+## Authentication and transport
+
+On first startup, migrations add the `Users`, `user_sessions`, and
+`auth_settings` tables. An empty user table is seeded with `admin` / `admin`.
+Change that known default promptly using **My account**; no default is recreated
+while any user exists. Existing data/configuration is retained during migration.
+
+The frontend and admin API require authentication; the public integration API
+remains unauthenticated, including existing device-control endpoints.
+Continue restricting host/network access even with admin authentication.
+
+Sessions use 15-minute JWTs and rotating HttpOnly refresh cookies with an absolute
+30-day expiry. The signing key is generated once and stored in the database,
+so restarts do not sign everyone out. Protect database files and backups with
+operating-system permissions; never distribute a production database in a bundle.
+
+Use HTTPS for deployment. Add this optional JSON section to the configuration
+when serving the frontend/API over HTTPS:
+
+```json
+"auth": {
+  "cookieSecure": true
+}
+```
+
+`cookieSecure` defaults to false to support the existing HTTP-only internal
+deployment and local development. HTTP does not protect passwords or tokens in
+transit. A Secure refresh cookie cannot be used over ordinary HTTP. Serve the
+frontend and API from the same origin, including when using a reverse proxy.
+No additional JWT secret needs to be added to the config or source code.
+
 ## Windows service (production)
 
 ### Tooling

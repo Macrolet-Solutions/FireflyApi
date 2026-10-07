@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+
+from alembic.config import Config
+from sqlalchemy.engine import make_url
 
 from alembic import command
-from alembic.config import Config
-
+from firefly_api.core.auth import initialize_auth
 from firefly_api.core.config import AppConfig
+from firefly_api.db.session import create_engine_for_url, create_session_factory
 
 
 def _backend_root() -> Path:
@@ -46,19 +48,9 @@ def ensure_sqlite_parent_dir(db_url: str) -> None:
         return
     if db_url == "sqlite:///:memory:" or db_url == "sqlite://":
         return
-    # SQLAlchemy SQLite URLs look like sqlite:///./data/firefly.db or
-    # sqlite:////absolute/path/firefly.db.
-    parsed = urlparse(db_url)
-    # netloc is empty for sqlite; the path holds everything after 'sqlite://'.
-    raw_path = parsed.path
-    # Strip the leading slash that SQLAlchemy requires before relative paths
-    # (sqlite:///./data/x.db -> '/./data/x.db').
-    if raw_path.startswith("/./") or raw_path.startswith("/."):
-        raw_path = raw_path[1:]
-    elif raw_path.startswith("/"):
-        # Absolute path on POSIX (/tmp/x.db) or a triple-slash relative on
-        # Windows. Both behave correctly once handed to pathlib.
-        pass
+    raw_path = make_url(db_url).database
+    if raw_path is None:
+        raise ValueError("SQLite database URL must specify a database path.")
     db_path = Path(raw_path)
     if not db_path.is_absolute():
         db_path = Path.cwd() / db_path
@@ -74,6 +66,12 @@ def run_migrations(config: AppConfig) -> None:
 
 
 def bootstrap(config: AppConfig) -> None:
-    """Steps 2 and 3 of the §11 startup sequence."""
+    """Migrate the database and initialize authentication before serving requests."""
     ensure_sqlite_parent_dir(config.database.url)
     run_migrations(config)
+    engine = create_engine_for_url(config.database.url)
+    try:
+        with create_session_factory(engine)() as db:
+            initialize_auth(db)
+    finally:
+        engine.dispose()

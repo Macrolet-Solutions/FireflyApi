@@ -35,8 +35,10 @@ import { ErrorAlert } from "@/components/ErrorAlert";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusDot } from "@/components/StatusDot";
 import { fmtRel } from "@/lib/format";
+import { AdminOnly, useAuth } from "@/auth/AuthContext";
 
 export function Devices() {
+  const { user } = useAuth();
   const devicesQ = useDevices();
   const brokersQ = useBrokers();
   const createDevice = useCreateDevice();
@@ -109,6 +111,7 @@ export function Devices() {
         title="Devices"
         description="Physical Firefly controllers known to this service."
         right={
+          <AdminOnly>
           <Button
             leftSection={<IconPlus size={16} />}
             disabled={brokers.length === 0}
@@ -116,6 +119,7 @@ export function Devices() {
           >
             Add device
           </Button>
+          </AdminOnly>
         }
       />
 
@@ -156,7 +160,7 @@ export function Devices() {
                 <Table.Tr>
                   <Table.Td colSpan={6}>
                     <Text c="dimmed" size="sm" ta="center" py="lg">
-                      No devices yet. Add one with the button above.
+                      {user?.role === "admin" ? "No devices yet. Add one with the button above." : "No devices configured."}
                     </Text>
                   </Table.Td>
                 </Table.Tr>
@@ -212,7 +216,7 @@ export function Devices() {
                             <IconExternalLink size={16} />
                           </ActionIcon>
                         </Tooltip>
-                        <Tooltip label="Delete">
+                        <AdminOnly><Tooltip label="Delete">
                           <ActionIcon
                             color="red"
                             variant="subtle"
@@ -220,7 +224,7 @@ export function Devices() {
                           >
                             <IconTrash size={16} />
                           </ActionIcon>
-                        </Tooltip>
+                        </Tooltip></AdminOnly>
                       </Group>
                     </Table.Td>
                   </Table.Tr>

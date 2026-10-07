@@ -51,6 +51,28 @@ npm run dev
 
 Open <http://localhost:5173/>.
 
+## Login and permissions
+
+The app opens on a login screen. A new installation has `admin` / `admin`;
+change the password in **My account**. Admins have a **Users** menu for
+creating, editing, disabling, and deleting accounts. Viewers see read-only
+configuration, status, and events; edit/delete/import/device controls and
+the Manual Test/Users menus are hidden. Viewers may export slot data.
+
+The branded login screen supports light/dark themes and adapts to smaller
+screens. Its theme toggle uses the same saved color preference as the console.
+
+JWT access tokens live only in memory, not localStorage. A rotating HttpOnly,
+SameSite=Strict refresh cookie restores login across browser restarts for up
+to 30 days. API calls refresh expired access tokens automatically. Logout
+clears the current session; password/role/status changes revoke sessions
+server-side. Cached data is cleared on logout or identity/role changes.
+Sessions are checked on window focus and every minute while signed in.
+
+Changing your own password signs out all your sessions. New passwords must
+contain 8-128 characters. Broker passwords are never exposed in API responses.
+These permissions apply to the admin interface; the public API remains public.
+
 ## Production build
 
 ```powershell

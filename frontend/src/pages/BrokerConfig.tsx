@@ -35,6 +35,7 @@ import {
 } from "@/api/hooks";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { PageHeader } from "@/components/PageHeader";
+import { AdminOnly, useAuth } from "@/auth/AuthContext";
 
 interface BrokerFormValues {
   name: string;
@@ -57,6 +58,7 @@ const EMPTY: BrokerFormValues = {
 };
 
 export function BrokerConfig() {
+  const { user } = useAuth();
   const brokersQ = useBrokers();
   const create = useCreateBroker();
   const update = useUpdateBroker();
@@ -193,7 +195,7 @@ export function BrokerConfig() {
         </Text>
       </Alert>
 
-      <ErrorAlert error={brokersQ.error} />
+      <ErrorAlert error={brokersQ.error || test.error} />
 
       <Card withBorder radius="md" padding="lg">
         {existing && !editing ? (
@@ -205,7 +207,7 @@ export function BrokerConfig() {
                   #{existing.id}
                 </Badge>
               </Group>
-              <Group>
+              <AdminOnly><Group>
                 <Button
                   variant="default"
                   leftSection={<IconRefresh size={16} />}
@@ -229,7 +231,7 @@ export function BrokerConfig() {
                 >
                   Delete
                 </Button>
-              </Group>
+              </Group></AdminOnly>
             </Group>
 
             <Stack gap={4}>
@@ -269,7 +271,7 @@ export function BrokerConfig() {
 
             {testResultBadge && <Group mt="md">{testResultBadge}</Group>}
           </Stack>
-        ) : (
+        ) : user?.role === "admin" ? (
           <form onSubmit={handleSubmit}>
             <Stack>
               <Title order={4}>
@@ -329,6 +331,8 @@ export function BrokerConfig() {
               </Group>
             </Stack>
           </form>
+        ) : (
+          <Text size="sm" c="dimmed">No MQTT broker configured.</Text>
         )}
       </Card>
     </Stack>

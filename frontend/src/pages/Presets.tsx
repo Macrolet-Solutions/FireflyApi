@@ -28,6 +28,7 @@ import type { FireflyCommandPreset } from "@/api/types";
 import { PATTERN_OPTIONS } from "@/api/types";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { PageHeader } from "@/components/PageHeader";
+import { AdminOnly } from "@/auth/AuthContext";
 
 interface PresetFormValues {
   name: string;
@@ -66,6 +67,7 @@ export function Presets() {
         title="Command presets"
         description="Friendly names for (state + pattern + pattern-value) combinations used in the manual test panel."
         right={
+          <AdminOnly>
           <Button
             leftSection={<IconPlus size={16} />}
             disabled={ledStates.length === 0}
@@ -73,6 +75,7 @@ export function Presets() {
           >
             Add preset
           </Button>
+          </AdminOnly>
         }
       />
 
@@ -115,7 +118,7 @@ export function Presets() {
                   </Table.Td>
                   <Table.Td>{p.pattern_value}</Table.Td>
                   <Table.Td style={{ textAlign: "right" }}>
-                    <Group gap="xs" justify="flex-end">
+                    <AdminOnly><Group gap="xs" justify="flex-end">
                       <Tooltip label="Edit">
                         <ActionIcon
                           variant="subtle"
@@ -149,7 +152,7 @@ export function Presets() {
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>
-                    </Group>
+                    </Group></AdminOnly>
                   </Table.Td>
                 </Table.Tr>
               ))}

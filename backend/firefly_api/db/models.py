@@ -29,7 +29,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-
 SEGMENT_MODE_STATIC = "static"
 SEGMENT_MODE_DYNAMIC = "dynamic"
 
@@ -50,6 +49,40 @@ class _Timestamped:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+
+
+class User(Base, _Timestamped):
+    __tablename__ = "Users"
+    __table_args__ = (CheckConstraint("role IN ('viewer', 'admin')", name="ck_users_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("Users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    refresh_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class AuthSetting(Base):
+    __tablename__ = "auth_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signing_key: Mapped[str] = mapped_column(String(128), nullable=False)
 
 
 class MqttBroker(Base, _Timestamped):

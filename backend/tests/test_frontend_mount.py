@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from firefly_api.core.auth import initialize_auth
 from firefly_api.core.config import (
     AppConfig,
     DatabaseConfig,
@@ -105,6 +106,13 @@ def test_admin_api_still_works_alongside_mount(
     session_factory: sessionmaker[Session], bundled_frontend: Path
 ) -> None:
     with _make_client(session_factory, bundled_frontend) as client:
+        with session_factory() as db:
+            initialize_auth(db)
+        token = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "admin"},
+            headers={"X-Firefly-CSRF": "1"},
+        ).json()["accessToken"]
+        client.headers["Authorization"] = f"Bearer {token}"
         r = client.get("/api/v1/admin/mqtt-brokers")
     assert r.status_code == 200
     assert r.json() == []

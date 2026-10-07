@@ -954,12 +954,15 @@ Version 1 should include at minimum:
 
 - No API key requirement for version 1 unless a later deployment requirement introduces one.
 - The service is expected to run inside a secure Macrolet/customer environment with network-level access control.
-- Optional application-level authentication may be added later, but it is not part of the Firefly firmware protocol and should not be confused with device registration or MQTT authentication.
+- The frontend and `/api/v1/admin/*` require JWT authentication. `viewer` users have read-only access (excluding user management); `admin` users have full access. The public API remains unauthenticated and unchanged. Application authentication is separate from firmware registration and MQTT authentication.
+- The `Users` table stores a unique internal ID, normalized unique username, Argon2id password hash, role (`viewer` or `admin`), enabled status, creation/update/last-login timestamps, and login-lockout state. Only an empty user table is seeded with `admin` / `admin`; changing the default password is strongly recommended. The last enabled admin cannot be deleted, disabled, or demoted.
+- JWT access tokens expire after 15 minutes. Rotating HttpOnly refresh cookies preserve login for an absolute maximum of 30 days. Refresh token hashes and revocation state are persisted in `user_sessions`, and a generated JWT signing key is persisted in `auth_settings`. Logout revokes the current session; password, username, role, or enabled-status changes revoke all of that user's sessions. Every admin request validates the current session and role against the database.
+- Authentication endpoints live under `/api/v1/auth`; admin-only user CRUD lives under `/api/v1/admin/users`. Viewers may change their own password. Login/refresh/logout require a CSRF protection header, and refresh cookies use SameSite=Strict. HTTPS deployments should configure `auth.cookieSecure: true`.
 - MQTT broker credentials are stored as **plain text** in the `mqtt_brokers` table. The deployment relies on operating-system filesystem permissions on the SQLite database file and on network-level access control around the host; no application-level encryption is applied. This is a deliberate Version 1 choice.
 - Passwords and MQTT credentials must never be returned in API responses. Admin GETs for `mqtt_brokers` must redact the password field.
 - Request/response logging must avoid logging secrets.
 
-Future versions may add user accounts, roles, and OAuth/OIDC integration.
+Future versions may add OAuth/OIDC integration.
 
 ## 13. Configuration
 

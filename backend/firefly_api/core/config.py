@@ -60,6 +60,12 @@ class LoggingConfig(BaseModel):
     folder: str = Field(default="./AppLogs", alias="folder")
 
 
+class AuthConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    cookie_secure: bool = Field(default=False, alias="cookieSecure")
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -69,6 +75,7 @@ class AppConfig(BaseModel):
     frontend: FrontendConfig = FrontendConfig()
     server: ServerConfig = ServerConfig()
     logging: LoggingConfig = LoggingConfig()
+    auth: AuthConfig = AuthConfig()
     firefly_upd_file_path: str | None = Field(default=None, alias="fireflyUpdFilePath")
 
 
