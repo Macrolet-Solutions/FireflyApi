@@ -128,6 +128,19 @@ Viewers can GET admin resources except users, but cannot call modifying or
 device-control endpoints. MQTT passwords are excluded for all roles. Public
 routes and their commands remain unauthenticated and unchanged.
 
+## Slot update latency
+
+Slot updates validate against current database configuration using scalar slot
+ID/index mappings rather than loading full slot ORM objects. Command responses
+use the task ID returned with the matching ACK, avoiding a second actor request.
+The lightweight public service dependency runs on the event loop; blocking
+database access and ACK waits remain in worker threads.
+
+MQTT round-trip time is only part of HTTP latency: database reads, actor mailbox
+queuing, synchronous event-log commits (including the received ACK), and HTTP
+processing also contribute. Event persistence still completes before command
+success is returned; these optimizations do not relax database durability.
+
 ## Tests
 
 ```powershell

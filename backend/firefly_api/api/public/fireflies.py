@@ -18,7 +18,7 @@ from firefly_api.schemas.public import (
 router = APIRouter(prefix="/fireflies", tags=["public:fireflies"])
 
 
-def get_service(request: Request) -> FireflyService:
+async def get_service(request: Request) -> FireflyService:
     service: FireflyService | None = getattr(request.app.state, "firefly_service", None)
     if service is None:
         # Phase 1 startup mode (no actor runtime) has no service. Tests

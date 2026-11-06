@@ -91,12 +91,11 @@ class FireflyService:
             }
         )
         outcome = self._await_outcome(future, per_attempt_ms)
-        snapshot = self._snapshot(actor)
         return {
             "deviceName": device_name,
             "status": "updated",
             "eventId": outcome.event_id,
-            "currentTaskId": snapshot.get("current_task_id"),
+            "currentTaskId": outcome.task_id,
             "clientRequestId": client_request_id,
         }
 
@@ -128,12 +127,11 @@ class FireflyService:
             }
         )
         outcome = self._await_outcome(future, per_attempt_ms)
-        snapshot = self._snapshot(actor)
         return {
             "deviceName": device_name,
             "status": "updated",
             "eventId": outcome.event_id,
-            "currentTaskId": snapshot.get("current_task_id"),
+            "currentTaskId": outcome.task_id,
             "clientRequestId": client_request_id,
         }
 
@@ -160,12 +158,11 @@ class FireflyService:
             }
         )
         outcome = self._await_outcome(future, per_attempt_ms)
-        snapshot = self._snapshot(actor)
         return {
             "deviceName": device_name,
             "status": "loaded",
             "eventId": outcome.event_id,
-            "currentTaskId": snapshot.get("current_task_id"),
+            "currentTaskId": outcome.task_id,
             "clientRequestId": None,
         }
 
@@ -198,12 +195,11 @@ class FireflyService:
             }
         )
         outcome = self._await_outcome(future, per_attempt_ms)
-        snapshot = self._snapshot(actor)
         return {
             "deviceId": device.id,
             "status": "reinitialized",
             "eventId": outcome.event_id,
-            "currentTaskId": snapshot.get("current_task_id"),
+            "currentTaskId": outcome.task_id,
         }
 
     def reset(self, *, device_id: int) -> dict:
@@ -268,12 +264,11 @@ class FireflyService:
             }
         )
         outcome = self._await_outcome(future, per_attempt_ms)
-        snapshot = self._snapshot(actor)
         return {
             "deviceName": device.name,
             "status": "updated",
             "eventId": outcome.event_id,
-            "currentTaskId": snapshot.get("current_task_id"),
+            "currentTaskId": outcome.task_id,
         }
 
     # ----------------------------------------------------- internal helpers ----
@@ -339,13 +334,16 @@ class FireflyService:
                 error_code="empty_slots_list",
             )
         with self._session_factory() as db:
-            db_slots = db.scalars(
-                select(FireflySlot).where(FireflySlot.device_id == device.id)
-            ).all()
+            slot_map = {
+                external_id: slot_index
+                for external_id, slot_index in db.execute(
+                    select(FireflySlot.external_slot_id, FireflySlot.slot_index)
+                    .where(FireflySlot.device_id == device.id)
+                )
+            }
             valid_state_names = set(
                 db.scalars(select(FireflyLedState.name)).all()
             )
-        slot_map = {s.external_slot_id: s.slot_index for s in db_slots}
         return [
             self._build_slot_struct(s, slot_map, valid_state_names) for s in slots_in
         ]
@@ -380,13 +378,16 @@ class FireflyService:
                 error_code="empty_slots_list",
             )
         with self._session_factory() as db:
-            db_slots = db.scalars(
-                select(FireflySlot).where(FireflySlot.device_id == device.id)
-            ).all()
+            slot_map = {
+                slot_id: slot_index
+                for slot_id, slot_index in db.execute(
+                    select(FireflySlot.id, FireflySlot.slot_index)
+                    .where(FireflySlot.device_id == device.id)
+                )
+            }
             valid_state_names = set(
                 db.scalars(select(FireflyLedState.name)).all()
             )
-        slot_map = {s.id: s.slot_index for s in db_slots}
         result: list[UpdateSlotStateSlot] = []
         for s in slots_in:
             slot_id = s["slot_id"]

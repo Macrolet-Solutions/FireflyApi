@@ -13,16 +13,18 @@ from __future__ import annotations
 import time
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import patch
 
 import pykka
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
 
+from firefly_api.db.models import FireflySlot
 from firefly_api.firefly.actors import ActorRegistry, RuntimeSettings
 from firefly_api.firefly.service import FireflyService
 from tests.firefly_helpers import AutoAckingMqttClient
-
 
 VERSION = "v01.04"
 
@@ -154,6 +156,96 @@ def test_update_firefly_slots_happy_path(
     assert body["eventId"]
     assert body["currentTaskId"]
     assert body["clientRequestId"] == "client-123"
+
+
+@pytest.mark.parametrize(
+    ("command", "mqtt_suffix"),
+    [
+        ("update", "/update-slot-state"),
+        ("update-all", "/update-all-slots"),
+        ("load", "/init-slots"),
+        ("reinitialize", "/init-slots"),
+        ("test", "/update-slot-state"),
+    ],
+)
+def test_command_response_uses_ack_task_without_snapshot(
+    client: TestClient, seeded: dict, runtime: dict[str, Any],
+    command: str, mqtt_suffix: str,
+) -> None:
+    name = seeded["device"]["name"]
+    device_id = seeded["device"]["id"]
+    state = seeded["led_state"]["name"]
+    requests = {
+        "update": (
+            f"/api/v1/public/fireflies/{name}/slots:update",
+            {"slots": [{"externalSlotId": "S-001", "stateName": state}]},
+        ),
+        "update-all": (
+            f"/api/v1/public/fireflies/{name}/slots:update-all",
+            {"stateName": state},
+        ),
+        "load": (
+            f"/api/v1/public/fireflies/{name}/load-slots",
+            {"segments": [{"channelNum": 2, "segmentNumInChannel": 1, "slots": []}]},
+        ),
+        "reinitialize": (f"/api/v1/admin/fireflies/{device_id}:reinitialize", {}),
+        "test": (
+            f"/api/v1/admin/fireflies/{device_id}/slots:test",
+            {"slots": [{"slotId": seeded["slot"]["id"], "stateName": state}]},
+        ),
+    }
+    url, body = requests[command]
+    with patch.object(
+        runtime["service"], "_snapshot",
+        side_effect=AssertionError("Command response must not request a snapshot"),
+    ):
+        response = client.post(url, json=body)
+    assert response.status_code == 200, response.text
+    payload = runtime["mqtt"].last_payload(mqtt_suffix)
+    assert response.json()["currentTaskId"] == payload["task-id"]
+    assert response.json()["eventId"] == payload["event-id"]
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_slot_update_mapping_avoids_orm_loads_and_preserves_order(
+    client: TestClient, seeded: dict, runtime: dict[str, Any], admin: bool,
+) -> None:
+    device_id = seeded["device"]["id"]
+    response = client.post(
+        f"/api/v1/admin/fireflies/{device_id}/slots",
+        json={
+            "segment_id": seeded["segment"]["id"],
+            "external_slot_id": "S-002",
+            "segment_position": 2,
+            "num_leds": 10,
+        },
+    )
+    assert response.status_code == 201, response.text
+    second_slot = response.json()
+    id_key = "slotId" if admin else "externalSlotId"
+    first_id = seeded["slot"]["id"] if admin else "S-001"
+    second_id = second_slot["id"] if admin else "S-002"
+    slots = [
+        {id_key: slot_id, "stateName": seeded["led_state"]["name"], "patternValue": value}
+        for value, slot_id in enumerate([second_id, first_id, second_id])
+    ]
+    url = (
+        f"/api/v1/admin/fireflies/{device_id}/slots:test" if admin
+        else f"/api/v1/public/fireflies/{seeded['device']['name']}/slots:update"
+    )
+
+    def reject_slot_load(*_args) -> None:
+        raise AssertionError("Slot mapping must not materialize ORM objects")
+
+    event.listen(FireflySlot, "load", reject_slot_load)
+    try:
+        response = client.post(url, json={"slots": slots})
+    finally:
+        event.remove(FireflySlot, "load", reject_slot_load)
+    assert response.status_code == 200, response.text
+    payload = runtime["mqtt"].last_payload("/update-slot-state")
+    assert [slot["slot-inx"] for slot in payload["slots"]] == [2, 1, 2]
+    assert [slot["pattern-value"] for slot in payload["slots"]] == [0, 1, 2]
 
 
 def test_update_firefly_slots_unknown_external_slot_id(
